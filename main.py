@@ -12,7 +12,7 @@ json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(json_creds, scopes=SCOPE)
 client = gspread.authorize(creds)
-sheet = client.open(os.environ['SHEET_NAME']).sheet1
+sheet = client.open_by_key(os.environ['SHEET_KEY']).sheet1
 
 # --- HELPERS ---
 def parse_duration(iso_duration):
