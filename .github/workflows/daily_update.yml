@@ -18,5 +18,5 @@ jobs:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           INSTAGRAM_TOKEN: ${{ secrets.INSTAGRAM_TOKEN }}
-          SHEET_NAME: ${{ secrets.SHEET_NAME }}
+          SHEET_KEY: ${{ secrets.SHEET_KEY }}
         run: python main.py
