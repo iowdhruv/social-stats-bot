@@ -44,22 +44,22 @@ def get_youtube_data(video_id):
     except: return None
 
 # --- INSTA CODE ---
-# def get_insta_data(media_id):
-#    if not media_id or len(str(media_id)) < 5: return None
-#    try:
-#        token = os.environ['INSTAGRAM_TOKEN']
-#        # Fetch timestamp, caption, like_count, comments_count
-#        url = f"https://graph.facebook.com/v18.0/{media_id}?fields=timestamp,caption,like_count,comments_count&access_token={token}"
-#        r = requests.get(url).json()
-#        
-#        return {
-#            'date': r.get('timestamp', '')[:10],
-#            'title': r.get('caption', '')[:50].split('\n')[0], # First line of caption
-#            'views': int(r.get('like_count', 0)),
-#            'comments': int(r.get('comments_count', 0)),
-#            'shares': 0 # API limit
-#        }
-#    except: return None
+ def get_insta_data(media_id):
+    if not media_id or len(str(media_id)) < 5: return None
+    try:
+        token = os.environ['INSTAGRAM_TOKEN']
+        # Fetch timestamp, caption, like_count, comments_count
+        url = f"https://graph.facebook.com/v18.0/{media_id}?fields=timestamp,caption,like_count,comments_count&access_token={token}"
+        r = requests.get(url).json()
+        
+        return {
+            'date': r.get('timestamp', '')[:10],
+            'title': r.get('caption', '')[:50].split('\n')[0], # First line of caption
+            'views': int(r.get('like_count', 0)),
+            'comments': int(r.get('comments_count', 0)),
+            'shares': 0 # API limit
+        }
+    except: return None
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
@@ -93,20 +93,20 @@ if __name__ == "__main__":
                     has_metadata = True # Prevent IG from overwriting if YT already did it
 
         # --- INSTAGRAM LOGIC ---
-#        if ig_id:
-#            ig_data = get_insta_data(ig_id)
-#            if ig_data:
-#                # Always update Stats
-#                cells_to_update.append(gspread.Cell(row_num, 4, ig_data['views']))    # D
-#                cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments'])) # F
-#                cells_to_update.append(gspread.Cell(row_num, 7, ig_data['shares']))   # G
-#                
-#                # If metadata STILL missing (no YT), fill from IG
-#                if not has_metadata:
-#                    cells_to_update.append(gspread.Cell(row_num, 1, ig_data['date']))
-#                    cells_to_update.append(gspread.Cell(row_num, 2, ig_data['title']))
-#        # IG has no "Length", leave C blank
-#        
+        if ig_id:
+            ig_data = get_insta_data(ig_id)
+            if ig_data:
+                # Always update Stats
+                cells_to_update.append(gspread.Cell(row_num, 4, ig_data['views']))    # D
+                cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments'])) # F
+                cells_to_update.append(gspread.Cell(row_num, 7, ig_data['shares']))   # G
+                
+                # If metadata STILL missing (no YT), fill from IG
+                if not has_metadata:
+                    cells_to_update.append(gspread.Cell(row_num, 1, ig_data['date']))
+                    cells_to_update.append(gspread.Cell(row_num, 2, ig_data['title']))
+        # IG has no "Length", leave C blank
+        
 
         time.sleep(0.1)
 
