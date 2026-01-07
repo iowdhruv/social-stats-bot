@@ -45,21 +45,21 @@ def get_youtube_data(video_id):
 
 # --- INSTA CODE ---
  def get_insta_data(media_id):
-    if not media_id or len(str(media_id)) < 5: return None
-    try:
-        token = os.environ['INSTAGRAM_TOKEN']
-        # Fetch timestamp, caption, like_count, comments_count
-        url = f"https://graph.facebook.com/v18.0/{media_id}?fields=timestamp,caption,like_count,comments_count&access_token={token}"
-        r = requests.get(url).json()
+     if not media_id or len(str(media_id)) < 5: return None
+     try:
+         token = os.environ['INSTAGRAM_TOKEN']
+         # Fetch timestamp, caption, like_count, comments_count
+         url = f"https://graph.facebook.com/v18.0/{media_id}?fields=timestamp,caption,like_count,comments_count&access_token={token}"
+         r = requests.get(url).json()
         
-        return {
-            'date': r.get('timestamp', '')[:10],
-            'title': r.get('caption', '')[:50].split('\n')[0], # First line of caption
-            'views': int(r.get('like_count', 0)),
-            'comments': int(r.get('comments_count', 0)),
-            'shares': 0 # API limit
-        }
-    except: return None
+         return {
+             'date': r.get('timestamp', '')[:10],
+             'title': r.get('caption', '')[:50].split('\n')[0], # First line of caption
+             'views': int(r.get('like_count', 0)),
+             'comments': int(r.get('comments_count', 0)),
+             'shares': 0 # API limit
+         }
+     except: return None
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
