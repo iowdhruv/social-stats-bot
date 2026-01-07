@@ -12,7 +12,6 @@ json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(json_creds, scopes=SCOPE)
 client = gspread.authorize(creds)
-
 sheet = client.open_by_key(os.environ['SHEET_KEY']).sheet1 
 
 # --- HELPERS ---
@@ -48,40 +47,52 @@ def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
     token = os.environ['INSTAGRAM_TOKEN']
     
-    # 1. Basic Info
-    # Updated to v22.0
+    # 1. Basic Info (Caption, Date, Comments)
     url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,media_product_type&access_token={token}"
     
-    # 2. Insights (New Universal 'views' metric)
-    # This works for Reels (Plays) and Posts (Impressions)
-    insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=views&access_token={token}"
-    
     try:
-        # Fetch Basic
         r = requests.get(url).json()
         if 'error' in r:
             print(f"IG Error: {r['error']['message']}")
             return None
-            
-        # Fetch Views
-        final_views = 0 
+
+        # 2. Insights: Ask for 'views' AND 'plays'
+        # Some accounts have migrated to 'views', some are stuck on 'plays'
+        insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=views,plays&access_token={token}"
+        
+        final_views = 0
+        
         try:
             r_ins = requests.get(insights_url).json()
+            
+            # Print debug to see what we actually get
             if 'data' in r_ins:
-                for item in r_ins['data']:
-                    # The metric name is now 'views'
-                    if item['name'] == 'views':
-                        final_views = int(item['values'][0]['value'])
+                stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
+                print(f"🔍 Stats for {media_id}: {stats}")
+                
+                # Priority: Views > Plays
+                if stats.get('views', 0) > 0:
+                    final_views = stats['views']
+                elif stats.get('plays', 0) > 0:
+                    final_views = stats['plays']
             else:
-                # Fallback only if Insights fail completely
-                pass 
+                # If requesting BOTH fails (e.g. one metric is invalid), try just 'plays'
+                # This handles the error "Metric views not supported"
+                if 'error' in r_ins:
+                     print(f"⚠️ specific metric error: {r_ins['error']['message']}")
+                     # Retry with just plays
+                     r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=plays&access_token={token}").json()
+                     if 'data' in r_retry:
+                         final_views = int(r_retry['data'][0]['values'][0]['value'])
+                         print(f"✅ Retry Success: Found {final_views} plays")
+
         except Exception as e:
-            print(f"IG Insights Error: {e}")
+            print(f"Insights Error: {e}")
 
         return {
             'date': r.get('timestamp', '')[:10],
             'title': r.get('caption', '')[:50].split('\n')[0],
-            'views': final_views,
+            'views': final_views, # 0 if no views/plays found
             'comments': int(r.get('comments_count', 0))
         }
     except Exception as e:
@@ -118,7 +129,7 @@ if __name__ == "__main__":
         if ig_id:
             ig_data = get_insta_data(ig_id)
             if ig_data:
-                # If YT missing, use IG stats
+                # Only write stats if YT is missing
                 if not yt_id:
                     cells_to_update.append(gspread.Cell(row_num, 5, ig_data['views']))
                     cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments']))
