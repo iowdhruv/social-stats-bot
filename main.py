@@ -49,10 +49,12 @@ def get_insta_data(media_id):
     token = os.environ['INSTAGRAM_TOKEN']
     
     # 1. Basic Info
-    url = f"https://graph.facebook.com/v19.0/{media_id}?fields=timestamp,caption,comments_count,media_product_type&access_token={token}"
+    # Updated to v22.0
+    url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,media_product_type&access_token={token}"
     
-    # 2. Insights (Strictly for PLAYS)
-    insights_url = f"https://graph.facebook.com/v19.0/{media_id}/insights?metric=plays&access_token={token}"
+    # 2. Insights (New Universal 'views' metric)
+    # This works for Reels (Plays) and Posts (Impressions)
+    insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=views&access_token={token}"
     
     try:
         # Fetch Basic
@@ -61,25 +63,20 @@ def get_insta_data(media_id):
             print(f"IG Error: {r['error']['message']}")
             return None
             
-        # Fetch Plays with DEBUG PRINT
+        # Fetch Views
         final_views = 0 
         try:
-            print(f"🔍 Asking for PLAYS for {media_id}...") # <--- DEBUG
             r_ins = requests.get(insights_url).json()
-            
-            # IF THIS PRINTS AN ERROR, WE KNOW WHY IT IS 0
-            if 'error' in r_ins:
-                print(f"❌ IG INSIGHTS ERROR: {r_ins}")
-            elif 'data' in r_ins:
+            if 'data' in r_ins:
                 for item in r_ins['data']:
-                    if item['name'] == 'plays':
+                    # The metric name is now 'views'
+                    if item['name'] == 'views':
                         final_views = int(item['values'][0]['value'])
-                        print(f"✅ Found PLAYS: {final_views}")
             else:
-                print(f"⚠️ Empty Data returned: {r_ins}")
-
+                # Fallback only if Insights fail completely
+                pass 
         except Exception as e:
-            print(f"IG Insights Exception: {e}")
+            print(f"IG Insights Error: {e}")
 
         return {
             'date': r.get('timestamp', '')[:10],
@@ -121,9 +118,12 @@ if __name__ == "__main__":
         if ig_id:
             ig_data = get_insta_data(ig_id)
             if ig_data:
+                # If YT missing, use IG stats
                 if not yt_id:
                     cells_to_update.append(gspread.Cell(row_num, 5, ig_data['views']))
                     cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments']))
+                
+                # Metadata
                 if not has_metadata:
                     cells_to_update.append(gspread.Cell(row_num, 1, ig_data['date']))
                     cells_to_update.append(gspread.Cell(row_num, 2, ig_data['title']))
