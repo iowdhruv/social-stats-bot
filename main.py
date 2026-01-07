@@ -23,6 +23,10 @@ COL_IG_REACH = 12     # L
 COL_YT_ID = 13        # M
 COL_IG_ID = 14        # N
 
+# --- GLOBAL STATS CONFIG ---
+CELL_YT_SUBS = "T4"
+CELL_IG_FOLLOWERS = "Q4"
+
 # --- SETUP ---
 json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -54,7 +58,8 @@ def get_youtube_data(video_id):
             'length': parse_duration(item['contentDetails']['duration']),
             'views': int(stats.get('viewCount', 0)),
             'likes': int(stats.get('likeCount', 0)),
-            'comments': int(stats.get('commentCount', 0))
+            'comments': int(stats.get('commentCount', 0)),
+            'channel_id': item['snippet']['channelId'] # Grab ID for global stats later
         }
     except: return None
 
@@ -72,54 +77,31 @@ def get_insta_data(media_id):
             return None
 
         # 2. Insights
-        # REMOVED 'plays' because it crashes v22 calls
-        # 'views' covers Reels Plays now. 'impressions' covers Photos.
-        
         final_views = 0
         reach = 0
         saves = 0
         
-        # Strategy: Try 'views' (Video/Reel standard). If it fails, try 'impressions' (Photo standard).
-        metrics_video = "views,reach,saved"
-        metrics_photo = "impressions,reach,saved"
-        
         # Determine likely type to choose metric
         is_video = r.get('media_product_type') == 'REELS' or r.get('media_type') == 'VIDEO'
-        
-        metrics_to_use = metrics_video if is_video else metrics_photo
-        
-        insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics_to_use}&access_token={token}"
+        metrics = "views,reach,saved" if is_video else "impressions,reach,saved"
         
         try:
-            r_ins = requests.get(insights_url).json()
-            
-            # Debug Print (Check logs if still 0)
-            # print(f"DEBUG INSIGHTS for {media_id}: {r_ins}")
-
+            r_ins = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics}&access_token={token}").json()
             if 'data' in r_ins:
                 stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
-                
-                # Parse Views/Impressions
                 if 'views' in stats: final_views = stats['views']
                 elif 'impressions' in stats: final_views = stats['impressions']
-                
-                # Parse Reach/Saves
                 reach = stats.get('reach', 0)
                 saves = stats.get('saved', 0)
-            
-            elif 'error' in r_ins:
-                # Fallback: If 'views' failed for some reason, try the photo metric 'impressions' just in case
-                if is_video:
-                    # print("Video views failed, retrying with impressions...")
-                    r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics_photo}&access_token={token}").json()
-                    if 'data' in r_retry:
-                        stats = {item['name']: int(item['values'][0]['value']) for item in r_retry['data']}
-                        final_views = stats.get('impressions', 0)
-                        reach = stats.get('reach', 0)
-                        saves = stats.get('saved', 0)
-
-        except Exception as e:
-            print(f"IG Insights Logic Error: {e}")
+            elif 'error' in r_ins and is_video:
+                 # Fallback for some video types
+                 r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=impressions,reach,saved&access_token={token}").json()
+                 if 'data' in r_retry:
+                     stats = {item['name']: int(item['values'][0]['value']) for item in r_retry['data']}
+                     final_views = stats.get('impressions', 0)
+                     reach = stats.get('reach', 0)
+                     saves = stats.get('saved', 0)
+        except: pass
 
         return {
             'date': r.get('timestamp', '')[:10],
@@ -134,10 +116,55 @@ def get_insta_data(media_id):
         print(f"IG Exception: {e}")
         return None
 
+# --- NEW HELPERS FOR GLOBAL STATS ---
+
+def update_global_insta_stats():
+    """Fetches Follower Count for the IG Page"""
+    try:
+        token = os.environ['INSTAGRAM_TOKEN']
+        # Find Page -> IG Business Account -> Followers
+        user_res = requests.get(f"https://graph.facebook.com/v22.0/me/accounts?fields=instagram_business_account&access_token={token}").json()
+        
+        ig_id = None
+        if 'data' in user_res:
+            for page in user_res['data']:
+                if 'instagram_business_account' in page:
+                    ig_id = page['instagram_business_account']['id']
+                    break
+        
+        if ig_id:
+            # Get Account Info
+            acc_res = requests.get(f"https://graph.facebook.com/v22.0/{ig_id}?fields=followers_count&access_token={token}").json()
+            followers = acc_res.get('followers_count', 0)
+            print(f"Global Update: Found {followers} IG Followers. Updating {CELL_IG_FOLLOWERS}...")
+            sheet.update_acell(CELL_IG_FOLLOWERS, followers)
+        else:
+            print("Global Update: Could not find IG Account ID.")
+    except Exception as e:
+        print(f"Global IG Update Failed: {e}")
+
+def update_global_yt_stats(channel_id):
+    """Fetches Subscriber Count for YT Channel"""
+    try:
+        api_key = os.environ['YOUTUBE_API_KEY']
+        youtube = build('youtube', 'v3', developerKey=api_key)
+        res = youtube.channels().list(part="statistics", id=channel_id).execute()
+        
+        if res['items']:
+            subs = int(res['items'][0]['statistics']['subscriberCount'])
+            print(f"Global Update: Found {subs} YT Subscribers. Updating {CELL_YT_SUBS}...")
+            sheet.update_acell(CELL_YT_SUBS, subs)
+    except Exception as e:
+        print(f"Global YT Update Failed: {e}")
+
+
+# --- MAIN ---
 if __name__ == "__main__":
     print("Reading Sheet...")
     all_data = sheet.get_all_values()
     cells_to_update = []
+    
+    found_yt_channel_id = None # We will grab this from the first video we scan
     
     for i in range(2, len(all_data)):
         row_num = i + 1
@@ -150,6 +177,10 @@ if __name__ == "__main__":
         if yt_id:
             yt_data = get_youtube_data(yt_id)
             if yt_data:
+                # Capture Channel ID from the first valid video we see
+                if not found_yt_channel_id:
+                    found_yt_channel_id = yt_data['channel_id']
+                
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_VIEWS, yt_data['views']))
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_LIKES, yt_data['likes']))
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_COMMENTS, yt_data['comments']))
@@ -174,6 +205,16 @@ if __name__ == "__main__":
         time.sleep(0.2)
 
     if cells_to_update:
-        print(f"Updating {len(cells_to_update)} cells...")
+        print(f"Updating {len(cells_to_update)} rows...")
         sheet.update_cells(cells_to_update)
-        print("Success!")
+    
+    # --- RUN GLOBAL STATS ---
+    print("\n--- Updating Global Counters ---")
+    update_global_insta_stats()
+    
+    if found_yt_channel_id:
+        update_global_yt_stats(found_yt_channel_id)
+    else:
+        print("Skipping YT Subs update (No YT Video found in sheet to extract Channel ID).")
+
+    print("Success!")
