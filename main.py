@@ -48,9 +48,8 @@ def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
     token = os.environ['INSTAGRAM_TOKEN']
     
-    # 1. Basic Info (Caption, Time, Comments)
-    # We DO NOT ask for like_count here to avoid temptation
-    url = f"https://graph.facebook.com/v19.0/{media_id}?fields=timestamp,caption,comments_count&access_token={token}"
+    # 1. Basic Info
+    url = f"https://graph.facebook.com/v19.0/{media_id}?fields=timestamp,caption,comments_count,media_product_type&access_token={token}"
     
     # 2. Insights (Strictly for PLAYS)
     insights_url = f"https://graph.facebook.com/v19.0/{media_id}/insights?metric=plays&access_token={token}"
@@ -62,22 +61,30 @@ def get_insta_data(media_id):
             print(f"IG Error: {r['error']['message']}")
             return None
             
-        # Fetch Plays
-        final_views = 0 # Default to 0 if plays unavailable
+        # Fetch Plays with DEBUG PRINT
+        final_views = 0 
         try:
+            print(f"🔍 Asking for PLAYS for {media_id}...") # <--- DEBUG
             r_ins = requests.get(insights_url).json()
-            if 'data' in r_ins:
+            
+            # IF THIS PRINTS AN ERROR, WE KNOW WHY IT IS 0
+            if 'error' in r_ins:
+                print(f"❌ IG INSIGHTS ERROR: {r_ins}")
+            elif 'data' in r_ins:
                 for item in r_ins['data']:
                     if item['name'] == 'plays':
                         final_views = int(item['values'][0]['value'])
+                        print(f"✅ Found PLAYS: {final_views}")
+            else:
+                print(f"⚠️ Empty Data returned: {r_ins}")
+
         except Exception as e:
-            print(f"IG Insights Error for {media_id}: {e}")
-            # We leave final_views as 0
+            print(f"IG Insights Exception: {e}")
 
         return {
             'date': r.get('timestamp', '')[:10],
             'title': r.get('caption', '')[:50].split('\n')[0],
-            'views': final_views,  # Strictly PLAYS
+            'views': final_views,
             'comments': int(r.get('comments_count', 0))
         }
     except Exception as e:
@@ -90,42 +97,33 @@ if __name__ == "__main__":
     all_data = sheet.get_all_values()
     cells_to_update = []
     
-    # Loop starts from Row 3 (Index 2)
     for i in range(2, len(all_data)):
         row_num = i + 1
         row = all_data[i]
         
         yt_id = row[7].strip() if len(row) > 7 else ""
         ig_id = row[8].strip() if len(row) > 8 else ""
-        
         has_metadata = (row[0] != "" and row[1] != "")
         
-        # --- YOUTUBE ---
+        # YT
         if yt_id:
             yt_data = get_youtube_data(yt_id)
             if yt_data:
                 cells_to_update.append(gspread.Cell(row_num, 5, yt_data['views']))
                 cells_to_update.append(gspread.Cell(row_num, 6, yt_data['comments']))
-                # SKIP SHARE COL (7)
-                
                 if not has_metadata:
                     cells_to_update.append(gspread.Cell(row_num, 1, yt_data['date']))
                     cells_to_update.append(gspread.Cell(row_num, 2, yt_data['title']))
                     cells_to_update.append(gspread.Cell(row_num, 3, yt_data['length']))
                     has_metadata = True 
 
-        # --- INSTAGRAM ---
+        # IG
         if ig_id:
             ig_data = get_insta_data(ig_id)
             if ig_data:
-                # Only write stats if YT is missing (priority logic)
                 if not yt_id:
-                    # Write PLAYS into Views Column
                     cells_to_update.append(gspread.Cell(row_num, 5, ig_data['views']))
-                    # Write COMMENTS
                     cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments']))
-                    # SKIP SHARE COL (7)
-
                 if not has_metadata:
                     cells_to_update.append(gspread.Cell(row_num, 1, ig_data['date']))
                     cells_to_update.append(gspread.Cell(row_num, 2, ig_data['title']))
@@ -137,5 +135,3 @@ if __name__ == "__main__":
         print(f"Updating {len(cells_to_update)} cells...")
         sheet.update_cells(cells_to_update)
         print("Success!")
-    else:
-        print("No updates needed.")
