@@ -6,7 +6,6 @@ import re
 from google.oauth2.service_account import Credentials
 
 # --- CONFIG ---
-# Instagram fetch limit (increase if you have older posts in the sheet)
 IG_FETCH_LIMIT = 50 
 
 # --- SETUP ---
@@ -21,32 +20,47 @@ insta_token = os.environ['INSTAGRAM_TOKEN']
 # --- HELPER FUNCTIONS ---
 
 def extract_yt_id(text):
-    """Extracts 11-char ID from YT URL or returns text if already ID"""
     if not text: return ""
-    # Regex for standard v=ID or short youtu.be/ID
     match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', text)
-    if match:
-        return match.group(1)
-    # If it looks like a raw ID already, return it
-    if len(text) == 11 and "http" not in text:
-        return text
-    return text # Return original if unsure
+    if match: return match.group(1)
+    if len(text) == 11 and "http" not in text: return text
+    return text 
 
 def get_ig_id_map():
-    """Fetches recent IG posts and creates a dictionary: {shortcode: media_id}"""
     print("Fetching Instagram Media Map...")
     
-    # 1. Get IG Business ID
-    user_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account&access_token={insta_token}"
+    # 1. Get ALL Pages and look for the one with Instagram
+    # We ask for the Page Name too, so the debug log is readable
+    user_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=name,instagram_business_account&access_token={insta_token}"
     user_res = requests.get(user_url).json()
     
-    try:
-        ig_biz_id = user_res['data'][0]['instagram_business_account']['id']
-    except (KeyError, IndexError):
-        print("❌ Error: Could not find Instagram Business Account ID. Check permissions.")
+    if 'error' in user_res:
+        print(f"❌ API Error: {user_res['error']['message']}")
         return {}
 
-    # 2. Get Media List
+    if 'data' not in user_res or not user_res['data']:
+        print("❌ Error: No Facebook Pages found for this user token.")
+        return {}
+
+    ig_biz_id = None
+    
+    # Loop through ALL pages to find the connected one
+    print(f"Found {len(user_res['data'])} Page(s). Scanning for Instagram link...")
+    
+    for page in user_res['data']:
+        page_name = page.get('name', 'Unknown')
+        if 'instagram_business_account' in page:
+            ig_biz_id = page['instagram_business_account']['id']
+            print(f"✅ Success! Found linked Instagram on page: '{page_name}' (ID: {ig_biz_id})")
+            break # Stop looking, we found it
+        else:
+            print(f"   - Page '{page_name}' has NO Instagram linked.")
+
+    if not ig_biz_id:
+        print("❌ Error: None of the pages have an Instagram Business Account linked.")
+        return {}
+
+    # 2. Get Media List using that ID
     media_url = f"https://graph.facebook.com/v19.0/{ig_biz_id}/media?fields=shortcode,id&limit={IG_FETCH_LIMIT}&access_token={insta_token}"
     media_res = requests.get(media_url).json()
     
@@ -54,65 +68,57 @@ def get_ig_id_map():
     for item in media_res.get('data', []):
         id_map[item['shortcode']] = item['id']
         
-    print(f"✅ Found {len(id_map)} recent Instagram posts.")
+    print(f"✅ Indexed {len(id_map)} recent Instagram posts.")
     return id_map
 
 def extract_ig_shortcode(text):
-    """Extracts shortcode from URL or returns raw text"""
     if not text: return ""
-    # Matches /p/CODE, /reel/CODE, or raw CODE
     match = re.search(r'(?:p\/|reel\/)([A-Za-z0-9_-]+)', text)
-    if match:
-        return match.group(1)
-    # If no http/www, assume it is the shortcode
-    if "http" not in text and len(text) < 20:
-        return text.strip()
+    if match: return match.group(1)
+    if "http" not in text and len(text) < 30: return text.strip()
     return text
 
 # --- MAIN LOGIC ---
 if __name__ == "__main__":
-    # 1. Prepare Data
     ig_map = get_ig_id_map()
+    
+    # If map is empty, stop here to avoid erasing data
+    if not ig_map:
+        print("⚠️ Skipping Sheet Update because IG Map failed.")
+        exit(1)
+
     all_values = sheet.get_all_values()
     updates = []
     
     print("\nScanning Sheet for messy URLs...")
-    
-    # Start loop from Row 3 (Index 2)
     for i in range(2, len(all_values)):
         row_num = i + 1
         row = all_values[i]
         
-        # Get current cell values (safely)
         current_yt = row[7].strip() if len(row) > 7 else ""
         current_ig = row[8].strip() if len(row) > 8 else ""
         
-        # --- YOUTUBE FIX ---
+        # YT Fix
         clean_yt = extract_yt_id(current_yt)
         if clean_yt != current_yt:
-            print(f"Row {row_num}: Converting YT URL -> {clean_yt}")
-            updates.append(gspread.Cell(row_num, 8, clean_yt)) # Col H is index 8 (1-based)
+            print(f"Row {row_num}: Fix YT -> {clean_yt}")
+            updates.append(gspread.Cell(row_num, 8, clean_yt))
             
-        # --- INSTAGRAM FIX ---
-        # 1. Extract shortcode (e.g. from URL)
+        # IG Fix
         shortcode = extract_ig_shortcode(current_ig)
-        
-        # 2. Check if it is already a long numeric ID (ignore if so)
         if not shortcode.isdigit() or len(shortcode) < 15:
-            # 3. Lookup the official ID in our map
             if shortcode in ig_map:
                 official_id = ig_map[shortcode]
                 if official_id != current_ig:
-                    print(f"Row {row_num}: Converting IG Shortcode {shortcode} -> {official_id}")
-                    updates.append(gspread.Cell(row_num, 9, official_id)) # Col I is index 9 (1-based)
+                    print(f"Row {row_num}: Fix IG {shortcode} -> {official_id}")
+                    updates.append(gspread.Cell(row_num, 9, official_id))
             else:
                 if current_ig:
-                    print(f"⚠️ Row {row_num}: Could not find Official ID for IG '{shortcode}' (Post might be too old or map failed)")
+                    print(f"⚠️ Row {row_num}: IG Post '{shortcode}' not found in recent fetch.")
 
-    # --- BATCH UPDATE ---
     if updates:
-        print(f"\nWriting {len(updates)} fixes to Google Sheet...")
+        print(f"\nWriting {len(updates)} fixes...")
         sheet.update_cells(updates)
-        print("✅ Sheet fixed!")
+        print("✅ Done!")
     else:
-        print("\n✅ Sheet is already clean.")
+        print("\n✅ Sheet is clean.")
