@@ -13,6 +13,7 @@ jobs:
         with:
           python-version: '3.9'
       - run: pip install -r requirements.txt 
+      
       - name: Run Fixer
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
@@ -27,3 +28,10 @@ jobs:
           INSTAGRAM_TOKEN: ${{ secrets.INSTAGRAM_TOKEN }}
           SHEET_KEY: ${{ secrets.SHEET_KEY }}
         run: python main.py
+
+        # STEP 3: Re-Apply Formatting
+      - name: Fix Formatting
+        env:
+          GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
+          SHEET_KEY: ${{ secrets.SHEET_KEY }}
+        run: python format_sheet.py
