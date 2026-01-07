@@ -7,6 +7,17 @@ import isodate
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
+# --- COLUMN CONFIG (1-Based Index) ---
+COL_DATE = 1        # A
+COL_TITLE = 2       # B
+COL_LENGTH = 3      # C
+COL_IG_VIEWS = 4    # D
+COL_YT_VIEWS = 5    # E
+COL_IG_COMMENTS = 6 # F
+COL_IG_SHARES = 7   # G
+COL_YT_ID = 8       # H
+COL_IG_ID = 9       # I
+
 # --- SETUP ---
 json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -14,7 +25,6 @@ creds = Credentials.from_service_account_info(json_creds, scopes=SCOPE)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(os.environ['SHEET_KEY']).sheet1 
 
-# --- HELPERS ---
 def parse_duration(iso_duration):
     try:
         dur = isodate.parse_duration(iso_duration)
@@ -31,7 +41,6 @@ def get_youtube_data(video_id):
         youtube = build('youtube', 'v3', developerKey=api_key)
         res = youtube.videos().list(part="snippet,contentDetails,statistics", id=video_id).execute()
         if not res['items']: return None
-        
         item = res['items'][0]
         stats = item['statistics']
         return {
@@ -39,7 +48,7 @@ def get_youtube_data(video_id):
             'title': item['snippet']['title'],
             'length': parse_duration(item['contentDetails']['duration']),
             'views': int(stats.get('viewCount', 0)),
-            'comments': int(stats.get('commentCount', 0))
+            # 'comments': int(stats.get('commentCount', 0)) # No column for this in your sheet!
         }
     except: return None
 
@@ -47,7 +56,7 @@ def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
     token = os.environ['INSTAGRAM_TOKEN']
     
-    # 1. Basic Info (Caption, Date, Comments)
+    # 1. Basic Info
     url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,media_product_type&access_token={token}"
     
     try:
@@ -56,50 +65,32 @@ def get_insta_data(media_id):
             print(f"IG Error: {r['error']['message']}")
             return None
 
-        # 2. Insights: Ask for 'views' AND 'plays'
-        # Some accounts have migrated to 'views', some are stuck on 'plays'
-        insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=views,plays&access_token={token}"
-        
+        # 2. Insights Strategy (Views/Plays)
         final_views = 0
         
+        # Try 'views' first (new standard)
         try:
-            r_ins = requests.get(insights_url).json()
-            
-            # Print debug to see what we actually get
+            r_ins = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=views&access_token={token}").json()
             if 'data' in r_ins:
-                stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
-                print(f"🔍 Stats for {media_id}: {stats}")
-                
-                # Priority: Views > Plays
-                if stats.get('views', 0) > 0:
-                    final_views = stats['views']
-                elif stats.get('plays', 0) > 0:
-                    final_views = stats['plays']
-            else:
-                # If requesting BOTH fails (e.g. one metric is invalid), try just 'plays'
-                # This handles the error "Metric views not supported"
-                if 'error' in r_ins:
-                     print(f"⚠️ specific metric error: {r_ins['error']['message']}")
-                     # Retry with just plays
-                     r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=plays&access_token={token}").json()
-                     if 'data' in r_retry:
-                         final_views = int(r_retry['data'][0]['values'][0]['value'])
-                         print(f"✅ Retry Success: Found {final_views} plays")
-
-        except Exception as e:
-            print(f"Insights Error: {e}")
+                 final_views = int(r_ins['data'][0]['values'][0]['value'])
+            elif 'error' in r_ins:
+                 # Retry with 'plays' if views fail
+                 r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=plays&access_token={token}").json()
+                 if 'data' in r_retry:
+                     final_views = int(r_retry['data'][0]['values'][0]['value'])
+        except:
+            pass
 
         return {
             'date': r.get('timestamp', '')[:10],
             'title': r.get('caption', '')[:50].split('\n')[0],
-            'views': final_views, # 0 if no views/plays found
+            'views': final_views,
             'comments': int(r.get('comments_count', 0))
         }
     except Exception as e:
         print(f"IG Exception: {e}")
         return None
 
-# --- MAIN LOOP ---
 if __name__ == "__main__":
     print("Reading Sheet...")
     all_data = sheet.get_all_values()
@@ -109,35 +100,43 @@ if __name__ == "__main__":
         row_num = i + 1
         row = all_data[i]
         
-        yt_id = row[7].strip() if len(row) > 7 else ""
-        ig_id = row[8].strip() if len(row) > 8 else ""
+        # Get IDs
+        yt_id = row[COL_YT_ID - 1].strip() if len(row) > (COL_YT_ID - 1) else ""
+        ig_id = row[COL_IG_ID - 1].strip() if len(row) > (COL_IG_ID - 1) else ""
+        
         has_metadata = (row[0] != "" and row[1] != "")
         
-        # YT
+        # --- YOUTUBE LOGIC ---
         if yt_id:
             yt_data = get_youtube_data(yt_id)
             if yt_data:
-                cells_to_update.append(gspread.Cell(row_num, 5, yt_data['views']))
-                cells_to_update.append(gspread.Cell(row_num, 6, yt_data['comments']))
+                # Update Youtube Views (Col E)
+                cells_to_update.append(gspread.Cell(row_num, COL_YT_VIEWS, yt_data['views']))
+                
+                # Update Metadata (Date, Title, Length)
                 if not has_metadata:
-                    cells_to_update.append(gspread.Cell(row_num, 1, yt_data['date']))
-                    cells_to_update.append(gspread.Cell(row_num, 2, yt_data['title']))
-                    cells_to_update.append(gspread.Cell(row_num, 3, yt_data['length']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_DATE, yt_data['date']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_TITLE, yt_data['title']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_LENGTH, yt_data['length']))
                     has_metadata = True 
 
-        # IG
+        # --- INSTAGRAM LOGIC ---
         if ig_id:
             ig_data = get_insta_data(ig_id)
             if ig_data:
-                # Only write stats if YT is missing
-                if not yt_id:
-                    cells_to_update.append(gspread.Cell(row_num, 5, ig_data['views']))
-                    cells_to_update.append(gspread.Cell(row_num, 6, ig_data['comments']))
+                # Update Insta Views (Col D)
+                cells_to_update.append(gspread.Cell(row_num, COL_IG_VIEWS, ig_data['views']))
                 
-                # Metadata
+                # Update Insta Comments (Col F)
+                cells_to_update.append(gspread.Cell(row_num, COL_IG_COMMENTS, ig_data['comments']))
+                
+                # IG Shares (Col G) is skipped (Manual)
+                
+                # Metadata (Only if YT didn't already fill it)
                 if not has_metadata:
-                    cells_to_update.append(gspread.Cell(row_num, 1, ig_data['date']))
-                    cells_to_update.append(gspread.Cell(row_num, 2, ig_data['title']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_DATE, ig_data['date']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_TITLE, ig_data['title']))
+                    # IG doesn't have length, so we skip Col C
                     has_metadata = True
         
         time.sleep(0.2)
