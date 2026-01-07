@@ -8,7 +8,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 # --- COLUMN CONFIG (1-Based Index) ---
-# Based on your latest screenshot:
 COL_DATE = 1          # A
 COL_TITLE = 2         # B
 COL_LENGTH = 3        # C
@@ -18,7 +17,7 @@ COL_IG_LIKES = 6      # F
 COL_YT_LIKES = 7      # G
 COL_IG_COMMENTS = 8   # H
 COL_YT_COMMENTS = 9   # I
-COL_IG_SHARES = 10    # J (Manual - Skipped)
+COL_IG_SHARES = 10    # J
 COL_IG_SAVES = 11     # K
 COL_IG_REACH = 12     # L
 COL_YT_ID = 13        # M
@@ -63,7 +62,7 @@ def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
     token = os.environ['INSTAGRAM_TOKEN']
     
-    # 1. Basic Info (Likes, Comments)
+    # 1. Basic Info
     url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,like_count,media_product_type&access_token={token}"
     
     try:
@@ -72,26 +71,55 @@ def get_insta_data(media_id):
             print(f"IG Error: {r['error']['message']}")
             return None
 
-        # 2. Insights (Views, Reach, Saves)
-        metrics = "views,plays,reach,saved"
-        insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics}&access_token={token}"
+        # 2. Insights
+        # REMOVED 'plays' because it crashes v22 calls
+        # 'views' covers Reels Plays now. 'impressions' covers Photos.
         
         final_views = 0
         reach = 0
         saves = 0
         
+        # Strategy: Try 'views' (Video/Reel standard). If it fails, try 'impressions' (Photo standard).
+        metrics_video = "views,reach,saved"
+        metrics_photo = "impressions,reach,saved"
+        
+        # Determine likely type to choose metric
+        is_video = r.get('media_product_type') == 'REELS' or r.get('media_type') == 'VIDEO'
+        
+        metrics_to_use = metrics_video if is_video else metrics_photo
+        
+        insights_url = f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics_to_use}&access_token={token}"
+        
         try:
             r_ins = requests.get(insights_url).json()
+            
+            # Debug Print (Check logs if still 0)
+            # print(f"DEBUG INSIGHTS for {media_id}: {r_ins}")
+
             if 'data' in r_ins:
                 stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
                 
-                # Priority: Views > Plays
-                if stats.get('views', 0) > 0: final_views = stats['views']
-                elif stats.get('plays', 0) > 0: final_views = stats['plays']
+                # Parse Views/Impressions
+                if 'views' in stats: final_views = stats['views']
+                elif 'impressions' in stats: final_views = stats['impressions']
                 
+                # Parse Reach/Saves
                 reach = stats.get('reach', 0)
                 saves = stats.get('saved', 0)
-        except: pass
+            
+            elif 'error' in r_ins:
+                # Fallback: If 'views' failed for some reason, try the photo metric 'impressions' just in case
+                if is_video:
+                    # print("Video views failed, retrying with impressions...")
+                    r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics_photo}&access_token={token}").json()
+                    if 'data' in r_retry:
+                        stats = {item['name']: int(item['values'][0]['value']) for item in r_retry['data']}
+                        final_views = stats.get('impressions', 0)
+                        reach = stats.get('reach', 0)
+                        saves = stats.get('saved', 0)
+
+        except Exception as e:
+            print(f"IG Insights Logic Error: {e}")
 
         return {
             'date': r.get('timestamp', '')[:10],
@@ -115,36 +143,30 @@ if __name__ == "__main__":
         row_num = i + 1
         row = all_data[i]
         
-        # Safe Indexing (Col M is index 12, Col N is index 13)
         yt_id = row[COL_YT_ID - 1].strip() if len(row) > (COL_YT_ID - 1) else ""
         ig_id = row[COL_IG_ID - 1].strip() if len(row) > (COL_IG_ID - 1) else ""
         
-        # --- YOUTUBE LOGIC ---
+        # --- YT ---
         if yt_id:
             yt_data = get_youtube_data(yt_id)
             if yt_data:
-                # Update Stats (E, G, I)
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_VIEWS, yt_data['views']))
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_LIKES, yt_data['likes']))
                 cells_to_update.append(gspread.Cell(row_num, COL_YT_COMMENTS, yt_data['comments']))
-                
-                # FORCE OVERWRITE METADATA (A, B, C)
                 cells_to_update.append(gspread.Cell(row_num, COL_DATE, yt_data['date']))
                 cells_to_update.append(gspread.Cell(row_num, COL_TITLE, yt_data['title']))
                 cells_to_update.append(gspread.Cell(row_num, COL_LENGTH, yt_data['length']))
 
-        # --- INSTAGRAM LOGIC ---
+        # --- IG ---
         if ig_id:
             ig_data = get_insta_data(ig_id)
             if ig_data:
-                # Update Stats (D, F, H, K, L)
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_VIEWS, ig_data['views']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_LIKES, ig_data['likes']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_COMMENTS, ig_data['comments']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_SAVES, ig_data['saves']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_REACH, ig_data['reach']))
                 
-                # Metadata (A, B) - Only if YT is missing
                 if not yt_id:
                     cells_to_update.append(gspread.Cell(row_num, COL_DATE, ig_data['date']))
                     cells_to_update.append(gspread.Cell(row_num, COL_TITLE, ig_data['title']))
