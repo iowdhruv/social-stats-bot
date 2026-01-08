@@ -46,7 +46,7 @@ def fix_dates():
         data_values = [[v] for v in col_values[2:]] # Slice off headers
         
         # WRITE ONLY TO COLUMN A with USER_ENTERED
-        sheet.update(data_range, data_values, value_input_option='USER_ENTERED')
+        sheet.update(values=data_values, range_name=data_range, value_input_option='USER_ENTERED')
         
         print("✅ Column A converted to Date Objects.")
 
