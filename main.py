@@ -4,6 +4,7 @@ import gspread
 import requests
 import time
 import isodate 
+from datetime import datetime, timedelta, timezone
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -52,8 +53,13 @@ def get_youtube_data(video_id):
         if not res['items']: return None
         item = res['items'][0]
         stats = item['statistics']
+        # --- New date logic --- #
+        utc_dt = datetime.strptime(item['snippet']['publishedAt'], "%Y-%m-%dT%H:%M:%SZ")
+        ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+        # ----------------------
+        
         return {
-            'date': item['snippet']['publishedAt'][:10],
+            'date': ist_date,
             'title': item['snippet']['title'],
             'length': parse_duration(item['contentDetails']['duration']),
             'views': int(stats.get('viewCount', 0)),
@@ -75,6 +81,12 @@ def get_insta_data(media_id):
         if 'error' in r:
             print(f"IG Error: {r['error']['message']}")
             return None
+
+        # --- NEW DATE LOGIC ---
+        # Handle ISO format with timezone (e.g. 2026-01-07T19:30:00+0000)
+        utc_dt = datetime.strptime(r.get('timestamp'), "%Y-%m-%dT%H:%M:%S%z")
+        ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+        # ----------------------
 
         # 2. Insights
         final_views = 0
@@ -104,7 +116,7 @@ def get_insta_data(media_id):
         except: pass
 
         return {
-            'date': r.get('timestamp', '')[:10],
+            'date': ist_date,
             'title': r.get('caption', '')[:50].split('\n')[0],
             'views': final_views,
             'comments': int(r.get('comments_count', 0)),
