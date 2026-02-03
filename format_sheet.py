@@ -52,6 +52,7 @@ def fix_dates():
 
     # 3. Apply the Visual Format "Tue, 7-Jan-2026"
     requests = [{
+        # Rule A: Formate date column (col A)
         "repeatCell": {
             "range": {
                 "sheetId": sheet.id,
@@ -68,6 +69,23 @@ def fix_dates():
                 }
             },
             "fields": "userEnteredFormat.numberFormat"
+        }
+    }, 
+        # Rule B: CLIP the content title (col B) so rows dont get huge
+    {
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet.id,
+                "startRowIndex": 2,    # Start from Row 3 (skip headers)
+                "startColumnIndex": 1, # Column B (Index 1)
+                "endColumnIndex": 2    # End at Column C (Index 2)
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "wrapStrategy": "CLIP" # <--- This fixes the height issue
+                }
+            },
+            "fields": "userEnteredFormat.wrapStrategy"
         }
     }]
     
