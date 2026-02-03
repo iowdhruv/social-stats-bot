@@ -71,8 +71,8 @@ def fix_formatting():
             "fields": "userEnteredFormat.numberFormat"
         }
     }, 
+    
     # Rule B: FORMAT TEXT (Col B) - Wrap + Top Align
-    print("Formatting Text in columns...")    
     {
         "repeatCell": {
             "range": {
