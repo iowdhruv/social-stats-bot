@@ -17,8 +17,10 @@ sheet = client.open_by_key(os.environ['SHEET_KEY']).sheet1
 def fix_formatting():
     print("Surgically fixing Date formats in Column A...")
     
-    # 1. Get all values in Column A
-    col_values = sheet.col_values(COL_INDEX + 1) # 1-based index for col_values
+    # 1. Get Values to determine heights
+    # We need Column B (Index 1) for text length
+    col_a_values = sheet.col_values(1) # Date
+    col_b_values = sheet.col_values(2) # Title/Caption
     
     # 2. Prepare updates just for Column A
     # We will re-write Column A using 'USER_ENTERED' mode.
@@ -51,8 +53,11 @@ def fix_formatting():
         print("✅ Column A converted to Date Objects.")
 
     # 3.Visual Formatting Rules
-    requests = [{
-        # Rule A: Formate date column (col A) (format eg: Thu, 7-Aug-2025)
+    # Prepare updates
+    requests = [}
+    
+    # Rule A: Formate date column (col A) (format eg: Thu, 7-Aug-2025)
+    requests.append({
         "repeatCell": {
             "range": {
                 "sheetId": sheet.id,
@@ -70,10 +75,12 @@ def fix_formatting():
             },
             "fields": "userEnteredFormat.numberFormat"
         }
-    }, 
+    }) 
+
+    print("Applying Smart Adaptive text formatting...")
     
     # Rule B: FORMAT TEXT (Col B) - Wrap + Top Align
-    {
+    requests.append({
         "repeatCell": {
             "range": {
                 "sheetId": sheet.id,
@@ -90,25 +97,36 @@ def fix_formatting():
             },
             "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment)"
         }
-    },
-    # Rule C: FORCE ROW HEIGHT (The Vertical Cutoff)
-    {
-        "updateDimensionProperties": {
-            "range": {
-                "sheetId": sheet.id,
-                "dimension": "ROWS",
-                "startIndex": 2, # Start from Row 3
-                "endIndex": len(col_values) # Apply to all data rows
-            },
-            "properties": {
-                "pixelSize": 42 # two lines thick (hides overflow text at the bottom)
-            },
-            "fields": "pixelSize"
-        }
-    }]
+    })
     
-    sheet.spreadsheet.batch_update({"requests": requests})
-    print("✅ Visual Format Applied.")
+    # Rule C: SMART ROW HEIGHTS (The Vertical Cutoff)
+    # We calculate height row by row based on text length
+    for i in range(2, len(col_a_values)):
+        # Get caption text (safely handle missing rows in Col B)
+        text = col_b_values[i] if i < len(col_b_values) else ""
+        
+        # LOGIC: Short -> 21px, Long -> 42px
+        height = 42 if len(text) > CHAR_LIMIT_FOR_DOUBLE else 21
+
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet.id,
+                    "dimension": "ROWS",
+                    "startIndex": i,
+                    "endIndex": i + 1
+                },
+                "properties": {
+                    "pixelSize": height
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+    # Send all requests
+    if requests:
+        sheet.spreadsheet.batch_update({"requests": requests})
+        print(f"✅ Smart Formatting applied to {len(col_a_values)-2} rows.")
 
 if __name__ == "__main__":
     fix_formatting()
