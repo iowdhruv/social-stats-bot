@@ -71,21 +71,38 @@ def fix_dates():
             "fields": "userEnteredFormat.numberFormat"
         }
     }, 
-        # Rule B: CLIP the content title (col B) so rows dont get huge
+        # Rule B: FORMAT TEXT (Col B) - Wrap + Top Align
     {
         "repeatCell": {
             "range": {
                 "sheetId": sheet.id,
-                "startRowIndex": 2,    # Start from Row 3 (skip headers)
-                "startColumnIndex": 1, # Column B (Index 1)
-                "endColumnIndex": 2    # End at Column C (Index 2)
+                "startRowIndex": 2, 
+                "startColumnIndex": 1, # Col B
+                "endColumnIndex": 2
             },
             "cell": {
                 "userEnteredFormat": {
-                    "wrapStrategy": "CLIP" # <--- This fixes the height issue
+                    "wrapStrategy": "WRAP",       # Allow wrapping
+                    "verticalAlignment": "TOP",   # Ensure we see the START of the caption
+                    "horizontalAlignment": "LEFT" # Standard reading direction
                 }
             },
-            "fields": "userEnteredFormat.wrapStrategy"
+            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment)"
+        }
+    },
+    # Rule C: FORCE ROW HEIGHT (The Vertical Cutoff)
+    {
+        "updateDimensionProperties": {
+            "range": {
+                "sheetId": sheet.id,
+                "dimension": "ROWS",
+                "startIndex": 2, # Start from Row 3
+                "endIndex": len(col_values) # Apply to all data rows
+            },
+            "properties": {
+                "pixelSize": 21 # Force standard height (hides overflow text at the bottom)
+            },
+            "fields": "pixelSize"
         }
     }]
     
