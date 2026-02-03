@@ -6,6 +6,7 @@ from google.oauth2.service_account import Credentials
 # --- CONFIG ---
 # Target Column A (Index 0)
 COL_INDEX = 0 
+CHAR_LIMIT_FOR_DOUBLE = 40 # Approx chars that fit in 1 line. Adjust if needed.
 
 # --- SETUP ---
 json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
