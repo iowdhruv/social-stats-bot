@@ -30,7 +30,7 @@ def extract_yt_id(text):
     return text 
 
 def get_ig_id_map():
-    print("Fetching Instagram Media Map...")
+    print("Fetching Instagram Media Map (All Posts)...")
     
     # 1. Find the Page with Instagram
     user_url = f"https://graph.facebook.com/v22.0/me/accounts?fields=name,instagram_business_account&access_token={insta_token}"
@@ -51,15 +51,42 @@ def get_ig_id_map():
         print("❌ Error: No Instagram linked to any page.")
         return {}
 
-    # 2. Fetch Media
-    media_url = f"https://graph.facebook.com/v22.0/{ig_biz_id}/media?fields=shortcode,id&limit={IG_FETCH_LIMIT}&access_token={insta_token}"
-    media_res = requests.get(media_url).json()
-    
+    # 2. Fetch Media (With Pagination Loop)
+    # We increase limit to 100 (API max) to reduce number of requests
+    url = f"https://graph.facebook.com/v22.0/{ig_biz_id}/media?fields=shortcode,id&limit=100&access_token={insta_token}"
     id_map = {}
-    for item in media_res.get('data', []):
-        id_map[item['shortcode']] = item['id']
+    page_count = 0
+    
+    while url:
+        try:
+            res = requests.get(url).json()
+            
+            if 'error' in res:
+                print(f"❌ API Error: {res['error']['message']}")
+                break
+                
+            items = res.get('data', [])
+            if not items:
+                break
+                
+            # Add this batch to our map
+            for item in items:
+                id_map[item['shortcode']] = item['id']
+            
+            page_count += 1
+            print(f"   - Page {page_count}: Indexed {len(items)} posts...")
+
+            # Check if there is a next page
+            if 'paging' in res and 'next' in res['paging']:
+                url = res['paging']['next']
+            else:
+                url = None # Stop loop
+                
+        except Exception as e:
+            print(f"❌ Loop Exception: {e}")
+            break
         
-    print(f"✅ Indexed {len(id_map)} recent posts.")
+    print(f"✅ Finished! Indexed Total: {len(id_map)} posts.")
     return id_map
 
 def extract_ig_shortcode(text):
