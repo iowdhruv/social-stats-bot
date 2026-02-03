@@ -117,7 +117,7 @@ def get_insta_data(media_id):
 
         return {
             'date': ist_date,
-            'title': r.get('caption', '')[:50].split('\n')[0],
+            'title': r.get('caption', ''), # Now writes the full caption
             'views': final_views,
             'comments': int(r.get('comments_count', 0)),
             'likes': int(r.get('like_count', 0)),
