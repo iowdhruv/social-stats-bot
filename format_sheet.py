@@ -25,6 +25,36 @@ def fix_formatting():
     col_a_values = sheet.col_values(1) # Date
     col_b_values = sheet.col_values(2) # Title/Caption
     col_values = col_a_values 
+
+    # ----- NEW: SANITIZE TITLES (Column B) -----
+    # Collapse double/triple newlines into a single newline
+    title_updates = []
+    
+    for index, title in enumerate(col_b_values):
+        # Skip headers (rows 0 and 1)
+        if index < 2: 
+            continue
+            
+        # Check if there are double newlines
+        if title and "\n\n" in title:
+            clean_title = title
+            # Keep replacing \n\n with \n until none are left
+            while "\n\n" in clean_title:
+                clean_title = clean_title.replace("\n\n", "\n")
+            
+            # Update local list so row height calculation is accurate
+            col_b_values[index] = clean_title 
+            
+            # Prepare batch update
+            title_updates.append({
+                'range': f'B{index + 1}', 
+                'values': [[clean_title]]
+            })
+
+    if title_updates:
+        sheet.batch_update(title_updates)
+        print(f"✅ Collapsed empty lines in {len(title_updates)} titles.")
+    # ----------------------------------------
     
     # 2. Prepare updates just for Column A
     # We will re-write Column A using 'USER_ENTERED' mode.
@@ -96,7 +126,7 @@ def fix_formatting():
                 "userEnteredFormat": {
                     "wrapStrategy": "WRAP",       # Allow wrapping
                     "verticalAlignment": "TOP",   # Ensure we see the START of the caption
-                    "horizontalAlignment": "LEFT" # Standard reading direction
+                    "horizontalAlignment": "CENTER"
                 }
             },
             "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment)"
@@ -110,7 +140,7 @@ def fix_formatting():
         text = col_b_values[i] if i < len(col_b_values) else ""
         
         # LOGIC: Short -> 21px, Long -> 42px
-        height = 42 if len(text) > CHAR_LIMIT_FOR_DOUBLE else 21
+        height = 40 if len(text) > CHAR_LIMIT_FOR_DOUBLE else 21
 
         requests.append({
             "updateDimensionProperties": {
