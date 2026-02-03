@@ -19,9 +19,12 @@ def fix_formatting():
     print("Surgically fixing Date formats in Column A...")
     
     # 1. Get Values to determine heights
+   
+    # OLD CODE: sheet.col_values(COL_INDEX + 1) # 1-based index for col_values
     # We need Column B (Index 1) for text length
     col_a_values = sheet.col_values(1) # Date
     col_b_values = sheet.col_values(2) # Title/Caption
+    col_values = col_a_values 
     
     # 2. Prepare updates just for Column A
     # We will re-write Column A using 'USER_ENTERED' mode.
@@ -49,7 +52,7 @@ def fix_formatting():
         data_values = [[v] for v in col_values[2:]] # Slice off headers
         
         # WRITE ONLY TO COLUMN A with USER_ENTERED
-        sheet.update(values=data_values, range_name=data_range, value_input_option='USER_ENTERED')
+        sheet.update(range_name=data_range, values=data_values, value_input_option='USER_ENTERED')
         
         print("✅ Column A converted to Date Objects.")
 
