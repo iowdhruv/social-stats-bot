@@ -55,7 +55,7 @@ def fix_formatting():
 
     # 3.Visual Formatting Rules
     # Prepare updates
-    requests = [}
+    requests = []
     
     # Rule A: Formate date column (col A) (format eg: Thu, 7-Aug-2025)
     requests.append({
