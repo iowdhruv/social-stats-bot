@@ -14,7 +14,7 @@ creds = Credentials.from_service_account_info(json_creds, scopes=SCOPE)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(os.environ['SHEET_KEY']).sheet1 
 
-def fix_dates():
+def fix_formatting():
     print("Surgically fixing Date formats in Column A...")
     
     # 1. Get all values in Column A
@@ -50,9 +50,9 @@ def fix_dates():
         
         print("✅ Column A converted to Date Objects.")
 
-    # 3. Apply the Visual Format "Tue, 7-Jan-2026"
+    # 3.Visual Formatting Rules
     requests = [{
-        # Rule A: Formate date column (col A)
+        # Rule A: Formate date column (col A) (format eg: Thu, 7-Aug-2025)
         "repeatCell": {
             "range": {
                 "sheetId": sheet.id,
@@ -71,7 +71,8 @@ def fix_dates():
             "fields": "userEnteredFormat.numberFormat"
         }
     }, 
-        # Rule B: FORMAT TEXT (Col B) - Wrap + Top Align
+    # Rule B: FORMAT TEXT (Col B) - Wrap + Top Align
+    print("Formatting Text in columns...")    
     {
         "repeatCell": {
             "range": {
@@ -100,7 +101,7 @@ def fix_dates():
                 "endIndex": len(col_values) # Apply to all data rows
             },
             "properties": {
-                "pixelSize": 21 # Force standard height (hides overflow text at the bottom)
+                "pixelSize": 42 # two lines thick (hides overflow text at the bottom)
             },
             "fields": "pixelSize"
         }
@@ -110,4 +111,4 @@ def fix_dates():
     print("✅ Visual Format Applied.")
 
 if __name__ == "__main__":
-    fix_dates()
+    fix_formatting()
