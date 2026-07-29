@@ -54,7 +54,33 @@ def fix_formatting():
     if title_updates:
         sheet.batch_update(title_updates)
         print(f"✅ Collapsed empty lines in {len(title_updates)} titles.")
+    
     # ----------------------------------------
+
+    
+    # ----- NEW: HYPERLINK IDs (Columns M & N) -----
+    
+    col_m_values = sheet.col_values(13) # YT_ID
+    col_n_values = sheet.col_values(14) # IG_ID
+    id_updates = []
+
+    for i in range(2, len(col_values)):
+        yt_id = col_m_values[i].strip() if i < len(col_m_values) else ""
+        ig_id = col_n_values[i].strip() if i < len(col_n_values) else ""
+        
+        if yt_id and not str(yt_id).startswith("=HYPERLINK"):
+            yt_url = f"https://www.youtube.com/watch?v={yt_id}"
+            id_updates.append({'range': f'M{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
+            
+        if ig_id and not str(ig_id).startswith("=HYPERLINK"):
+            ig_url = f"https://www.instagram.com/p/{ig_id}/"
+            id_updates.append({'range': f'N{i + 1}', 'values': [[f'=HYPERLINK("{ig_url}", "{ig_id}")']]})
+
+    if id_updates:
+        sheet.batch_update(id_updates, value_input_option='USER_ENTERED')
+        print(f"✅ Converted {len(id_updates)} IDs into clickable hyperlinks.")
+        
+    # ----------------------------------------------
     
     # 2. Prepare updates just for Column A
     # We will re-write Column A using 'USER_ENTERED' mode.
