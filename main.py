@@ -74,7 +74,7 @@ def get_insta_data(media_id):
     token = os.environ['INSTAGRAM_TOKEN']
     
     # 1. Basic Info
-    url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,like_count,media_product_type&access_token={token}"
+    url = f"https://graph.facebook.com/v22.0/{media_id}?fields=timestamp,caption,comments_count,like_count,media_product_type,permalink&access_token={token}"
     
     try:
         r = requests.get(url).json()
@@ -122,7 +122,8 @@ def get_insta_data(media_id):
             'comments': int(r.get('comments_count', 0)),
             'likes': int(r.get('like_count', 0)),
             'reach': reach,
-            'saves': saves
+            'saves': saves,
+            'permalink': r.get('permalink', '')
         }
     except Exception as e:
         print(f"IG Exception: {e}")
@@ -209,6 +210,10 @@ if __name__ == "__main__":
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_COMMENTS, ig_data['comments']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_SAVES, ig_data['saves']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_REACH, ig_data['reach']))
+                # --- NEW: Write real hyperlink to the IG_ID column ---
+                if ig_data.get('permalink'):
+                    ig_formula = f'=HYPERLINK("{ig_data["permalink"]}", "{ig_id}")'
+                    cells_to_update.append(gspread.Cell(row_num, COL_IG_ID, ig_formula))
                 
                 if not yt_id:
                     cells_to_update.append(gspread.Cell(row_num, COL_DATE, ig_data['date']))
@@ -218,7 +223,7 @@ if __name__ == "__main__":
 
     if cells_to_update:
         print(f"Updating {len(cells_to_update)} rows...")
-        sheet.update_cells(cells_to_update)
+        sheet.update_cells(cells_to_update, value_input_option='USER_ENTERED')
     
     # --- RUN GLOBAL STATS ---
     print("\n--- Updating Global Counters ---")
