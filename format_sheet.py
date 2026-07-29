@@ -72,10 +72,6 @@ def fix_formatting():
             yt_url = f"https://www.youtube.com/watch?v={yt_id}"
             id_updates.append({'range': f'M{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
             
-        if ig_id and not str(ig_id).startswith("=HYPERLINK"):
-            ig_url = f"https://www.instagram.com/p/{ig_id}/"
-            id_updates.append({'range': f'N{i + 1}', 'values': [[f'=HYPERLINK("{ig_url}", "{ig_id}")']]})
-
     if id_updates:
         sheet.batch_update(id_updates, value_input_option='USER_ENTERED')
         print(f"✅ Converted {len(id_updates)} IDs into clickable hyperlinks.")
