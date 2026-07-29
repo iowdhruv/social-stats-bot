@@ -8,8 +8,10 @@ jobs:
   run-script:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      # Changed v3 to v4 here
+      - uses: actions/checkout@v4
+      # Changed v4 to v5 here
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt 
