@@ -100,10 +100,27 @@ def extract_ig_shortcode(text):
 
 def extract_fb_id(text):
     if not text: return ""
-    # Matches FB reel, video, or post IDs
+    
+    # 1. Resolve share links (e.g., fb.watch or facebook.com/share)
+    if "facebook.com/share/" in text or "fb.watch/" in text:
+        try:
+            url_to_resolve = text
+            # Extract the URL if it's inside a HYPERLINK formula
+            formula_match = re.search(r'\"(https?://[^\"]+)\"', text)
+            if formula_match:
+                url_to_resolve = formula_match.group(1)
+                
+            res = requests.get(url_to_resolve, allow_redirects=True, timeout=10)
+            text = res.url
+        except Exception as e:
+            print(f"Could not resolve FB share link: {e}")
+
+    # 2. Extract numeric ID
     match = re.search(r'(?:v=|/posts/|/reel/|/videos/|fbid=|story_fbid=)([0-9]+)', text)
     if match: return match.group(1)
+    
     if text.strip().isdigit(): return text.strip()
+    
     if "http" not in text and len(text) < 40: return text.strip()
     return text
 
