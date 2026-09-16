@@ -25,15 +25,14 @@ COL_IG_SHARES = 13    # M
 COL_FB_SHARES = 14    # N
 COL_IG_SAVES = 15     # O
 COL_IG_REACH = 16     # P
-COL_FB_REACH = 17     # Q
-COL_YT_ID = 18        # R
-COL_IG_ID = 19        # S
-COL_FB_ID = 20        # T
+COL_YT_ID = 17        # Q
+COL_IG_ID = 18        # R
+COL_FB_ID = 19        # S
 
 # --- GLOBAL STATS CONFIG ---
-CELL_IG_FOLLOWERS = "W4"
-CELL_FB_FOLLOWERS = "Z4"
-CELL_YT_SUBS = "AC4"
+CELL_IG_FOLLOWERS = "V4"
+CELL_FB_FOLLOWERS = "Y4"
+CELL_YT_SUBS = "AB4"
 
 # --- SETUP ---
 json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
@@ -202,78 +201,23 @@ def get_facebook_data(post_id, page_token, page_id=None):
         except Exception:
             pass
 
-# 3. Fetch Insights (Views & Reach)
-    try:
-        target_page_id = page_id or r.get('from', {}).get('id') or globals().get('fb_page_id')
-        if not target_page_id and page_token:
-            try:
-                me_res = requests.get(f"https://graph.facebook.com/v26.0/me?fields=id&access_token={page_token}").json()
-                target_page_id = me_res.get('id')
-            except Exception:
-                pass
-
-        alt_token = user_token if used_token == page_token else page_token
-        tokens = [tok for tok in [used_token, alt_token] if tok]
-
-        # A. For Reels and Videos: query /video_insights with explicit Reels metrics
-        if is_video_node:
-            for tok in tokens:
-                try:
-                    # blue_reels_play_count: unique initial playback sessions (excluding replays)
-                    # total_video_views_unique: unique 3s viewers fallback
-                    v_url = (
-                        f"https://graph.facebook.com/v26.0/{post_id}/video_insights"
-                        f"?metric=blue_reels_play_count,total_video_views_unique"
-                        f"&access_token={tok}"
-                    )
-                    v_res = requests.get(v_url).json()
-                    metric_map = {
-                        item.get('name'): int(item['values'][0].get('value', 0))
-                        for item in v_res.get('data', [])
-                        if item.get('values')
-                    }
-                    reach = metric_map.get('blue_reels_play_count', 0) or metric_map.get('total_video_views_unique', 0)
-                    if reach > 0:
-                        break
-                except Exception:
-                    pass
-
-        # B. Fallback to Post-level Viewers metric if reach is still 0
-        if reach == 0:
-            # Attempt to resolve post_id if current ID is a video node
-            resolved_post_id = post_id
+    # 3. Fallback for views ONLY if final_views was not set from the node
+    if final_views == 0:
+        try:
             if is_video_node:
-                try:
-                    p_info = requests.get(f"https://graph.facebook.com/v26.0/{post_id}?fields=post_id&access_token={used_token}").json()
-                    resolved_post_id = p_info.get('post_id') or post_id
-                except Exception:
-                    pass
-
-            targets = []
-            if target_page_id and str(target_page_id) not in str(resolved_post_id):
-                targets.append(f"{target_page_id}_{resolved_post_id}")
-            targets.append(resolved_post_id)
-
-            for target in targets:
-                for tok in tokens:
-                    for p_url in [
-                        f"https://graph.facebook.com/v26.0/{target}/insights/post_total_media_view_unique?access_token={tok}",
-                        f"https://graph.facebook.com/v26.0/{target}/insights?metric=post_total_media_view_unique&period=lifetime&access_token={tok}",
-                        f"https://graph.facebook.com/v26.0/{target}/insights?metric=post_impressions_unique&period=lifetime&access_token={tok}"
-                    ]:
-                        try:
-                            p_res = requests.get(p_url).json()
-                            for item in p_res.get('data', []):
-                                if item.get('values'):
-                                    val = int(item['values'][0].get('value', 0))
-                                    if val > 0:
-                                        reach = val
-                                        break
-                        except Exception:
-                            pass
-                        if reach > 0: break
-                    if reach > 0: break
-                if reach > 0: break
+                v_res = requests.get(f"https://graph.facebook.com/v26.0/{post_id}/video_insights?metric=fb_reels_total_plays,total_video_views&access_token={used_token}").json()
+                for item in v_res.get('data', []):
+                    if item.get('values'):
+                        final_views = int(item['values'][0]['value'])
+                        if final_views > 0: break
+            else:
+                p_res = requests.get(f"https://graph.facebook.com/v26.0/{post_id}/insights?metric=post_media_view,post_video_views&access_token={used_token}").json()
+                for item in p_res.get('data', []):
+                    if item.get('values'):
+                        final_views = int(item['values'][0]['value'])
+                        if final_views > 0: break
+        except Exception as e:
+            print(f"FB Insights Exception: {e}")
 
         # Protect final_views: only fallback if views was not populated from node
         if final_views == 0:
@@ -511,7 +455,6 @@ if __name__ == "__main__":
                 cells_to_update.append(gspread.Cell(row_num, COL_FB_LIKES, fb_data['likes']))
                 cells_to_update.append(gspread.Cell(row_num, COL_FB_COMMENTS, fb_data['comments']))
                 cells_to_update.append(gspread.Cell(row_num, COL_FB_SHARES, fb_data['shares']))
-                cells_to_update.append(gspread.Cell(row_num, COL_FB_REACH, fb_data['reach']))
                 
                 if fb_data.get('permalink'):
                     fb_formula = f'=HYPERLINK("{fb_data["permalink"]}", "{fb_id}")'
