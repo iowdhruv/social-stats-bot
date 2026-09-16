@@ -13,20 +13,27 @@ COL_DATE = 1          # A
 COL_TITLE = 2         # B
 COL_LENGTH = 3        # C
 COL_IG_VIEWS = 4      # D
-COL_YT_VIEWS = 5      # E
-COL_IG_LIKES = 6      # F
-COL_YT_LIKES = 7      # G
-COL_IG_COMMENTS = 8   # H
-COL_YT_COMMENTS = 9   # I
-COL_IG_SHARES = 10    # J
-COL_IG_SAVES = 11     # K
-COL_IG_REACH = 12     # L
-COL_YT_ID = 13        # M
-COL_IG_ID = 14        # N
+COL_FB_VIEWS = 5      # E
+COL_YT_VIEWS = 6      # F
+COL_IG_LIKES = 7      # G
+COL_FB_LIKES = 8      # H
+COL_YT_LIKES = 9      # I
+COL_IG_COMMENTS = 10  # J
+COL_FB_COMMENTS = 11  # K
+COL_YT_COMMENTS = 12  # L
+COL_IG_SHARES = 13    # M
+COL_FB_SHARES = 14    # N
+COL_IG_SAVES = 15     # O
+COL_IG_REACH = 16     # P
+COL_FB_REACH = 17     # Q
+COL_YT_ID = 18        # R
+COL_IG_ID = 19        # S
+COL_FB_ID = 20        # T
 
 # --- GLOBAL STATS CONFIG ---
-CELL_YT_SUBS = "T4"
-CELL_IG_FOLLOWERS = "Q4"
+CELL_IG_FOLLOWERS = "W4"
+CELL_FB_FOLLOWERS = "Z4"
+CELL_YT_SUBS = "AC4"
 
 # --- SETUP ---
 json_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
@@ -69,6 +76,66 @@ def get_youtube_data(video_id):
         }
     except: return None
 
+
+def get_fb_page_token_and_id():
+    """Exchanges User Token for Page Access Token dynamically"""
+    token = os.environ['INSTAGRAM_TOKEN']
+    url = f"https://graph.facebook.com/v22.0/me/accounts?fields=id,access_token,instagram_business_account&access_token={token}"
+    try:
+        res = requests.get(url).json()
+        if 'data' in res and len(res['data']) > 0:
+            for page in res['data']:
+                if 'instagram_business_account' in page:
+                    return page['access_token'], page['id']
+            return res['data'][0]['access_token'], res['data'][0]['id']
+    except Exception as e:
+        print(f"Error fetching Page Token: {e}")
+    return None, None
+
+def get_facebook_data(post_id, page_token):
+    if not post_id or len(str(post_id)) < 5 or not page_token: return None
+    
+    url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),reactions.summary(true),shares,permalink_url&access_token={page_token}"
+    
+    try:
+        r = requests.get(url).json()
+        if 'error' in r:
+            print(f"FB Error for {post_id}: {r['error']['message']}")
+            return None
+
+        utc_dt = datetime.strptime(r.get('created_time'), "%Y-%m-%dT%H:%M:%S%z")
+        ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+
+        final_views = 0
+        reach = 0
+        
+        try:
+            r_ins = requests.get(f"https://graph.facebook.com/v22.0/{post_id}/insights?metric=post_impressions,post_impressions_unique,post_video_views&access_token={page_token}").json()
+            if 'data' in r_ins:
+                stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
+                final_views = stats.get('post_video_views', stats.get('post_impressions', 0))
+                reach = stats.get('post_impressions_unique', 0)
+        except: pass
+
+        comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
+        reactions_count = r.get('reactions', {}).get('summary', {}).get('total_count', 0)
+        shares_count = r.get('shares', {}).get('count', 0)
+
+        return {
+            'date': ist_date,
+            'title': r.get('message', ''),
+            'views': final_views,
+            'comments': comments_count,
+            'likes': reactions_count,
+            'shares': shares_count,
+            'reach': reach,
+            'permalink': r.get('permalink_url', '')
+        }
+    except Exception as e:
+        print(f"FB Exception: {e}")
+        return None
+
+
 def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
     token = os.environ['INSTAGRAM_TOKEN']
@@ -95,7 +162,9 @@ def get_insta_data(media_id):
         
         # Determine likely type to choose metric
         is_video = r.get('media_product_type') == 'REELS' or r.get('media_type') == 'VIDEO'
-        metrics = "views,reach,saved" if is_video else "impressions,reach,saved"
+        metrics = "views,reach,saved,shares" if is_video else "impressions,reach,saved,shares"
+
+        shares = 0
         
         try:
             r_ins = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric={metrics}&access_token={token}").json()
@@ -105,14 +174,16 @@ def get_insta_data(media_id):
                 elif 'impressions' in stats: final_views = stats['impressions']
                 reach = stats.get('reach', 0)
                 saves = stats.get('saved', 0)
+                shares = stats.get('shares', 0)
             elif 'error' in r_ins and is_video:
                  # Fallback for some video types
-                 r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=impressions,reach,saved&access_token={token}").json()
+                 r_retry = requests.get(f"https://graph.facebook.com/v22.0/{media_id}/insights?metric=impressions,reach,saved,shares&access_token={token}").json()
                  if 'data' in r_retry:
                      stats = {item['name']: int(item['values'][0]['value']) for item in r_retry['data']}
                      final_views = stats.get('impressions', 0)
                      reach = stats.get('reach', 0)
                      saves = stats.get('saved', 0)
+                     shares = stats.get('shares', 0)
         except: pass
 
         return {
@@ -121,6 +192,7 @@ def get_insta_data(media_id):
             'views': final_views,
             'comments': int(r.get('comments_count', 0)),
             'likes': int(r.get('like_count', 0)),
+            'shares': shares,
             'reach': reach,
             'saves': saves,
             'permalink': r.get('permalink', '')
@@ -130,6 +202,18 @@ def get_insta_data(media_id):
         return None
 
 # --- NEW HELPERS FOR GLOBAL STATS ---
+
+def update_global_fb_stats(page_id, page_token):
+    """Fetches Follower Count for the FB Page"""
+    if not page_id or not page_token:
+        return
+    try:
+        acc_res = requests.get(f"https://graph.facebook.com/v22.0/{page_id}?fields=followers_count&access_token={page_token}").json()
+        followers = acc_res.get('followers_count', 0)
+        print(f"Global Update: Found {followers} FB Followers. Updating {CELL_FB_FOLLOWERS}...")
+        sheet.update_acell(CELL_FB_FOLLOWERS, followers)
+    except Exception as e:
+        print(f"Global FB Update Failed: {e}")
 
 def update_global_insta_stats():
     """Fetches Follower Count for the IG Page"""
@@ -173,6 +257,11 @@ def update_global_yt_stats(channel_id):
 
 # --- MAIN ---
 if __name__ == "__main__":
+    print("Fetching FB Page Token...")
+    fb_page_token, fb_page_id = get_fb_page_token_and_id()
+    if not fb_page_token:
+        print("⚠️ Could not retrieve FB Page Token. FB metrics may fail.")
+    
     print("Reading Sheet...")
     all_data = sheet.get_all_values()
     cells_to_update = []
@@ -185,6 +274,7 @@ if __name__ == "__main__":
         
         yt_id = row[COL_YT_ID - 1].strip() if len(row) > (COL_YT_ID - 1) else ""
         ig_id = row[COL_IG_ID - 1].strip() if len(row) > (COL_IG_ID - 1) else ""
+        fb_id = row[COL_FB_ID - 1].strip() if len(row) > (COL_FB_ID - 1) else ""
         
         # --- YT ---
         if yt_id:
@@ -208,6 +298,7 @@ if __name__ == "__main__":
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_VIEWS, ig_data['views']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_LIKES, ig_data['likes']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_COMMENTS, ig_data['comments']))
+                cells_to_update.append(gspread.Cell(row_num, COL_IG_SHARES, ig_data.get('shares', 0)))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_SAVES, ig_data['saves']))
                 cells_to_update.append(gspread.Cell(row_num, COL_IG_REACH, ig_data['reach']))
                 # --- NEW: Write real hyperlink to the IG_ID column ---
@@ -218,6 +309,24 @@ if __name__ == "__main__":
                 if not yt_id:
                     cells_to_update.append(gspread.Cell(row_num, COL_DATE, ig_data['date']))
                     cells_to_update.append(gspread.Cell(row_num, COL_TITLE, ig_data['title']))
+
+        # --- FB ---
+        if fb_id:
+            fb_data = get_facebook_data(fb_id, fb_page_token)
+            if fb_data:
+                cells_to_update.append(gspread.Cell(row_num, COL_FB_VIEWS, fb_data['views']))
+                cells_to_update.append(gspread.Cell(row_num, COL_FB_LIKES, fb_data['likes']))
+                cells_to_update.append(gspread.Cell(row_num, COL_FB_COMMENTS, fb_data['comments']))
+                cells_to_update.append(gspread.Cell(row_num, COL_FB_SHARES, fb_data['shares']))
+                cells_to_update.append(gspread.Cell(row_num, COL_FB_REACH, fb_data['reach']))
+                
+                if fb_data.get('permalink'):
+                    fb_formula = f'=HYPERLINK("{fb_data["permalink"]}", "{fb_id}")'
+                    cells_to_update.append(gspread.Cell(row_num, COL_FB_ID, fb_formula))
+                
+                if not yt_id and not ig_id:
+                    cells_to_update.append(gspread.Cell(row_num, COL_DATE, fb_data['date']))
+                    cells_to_update.append(gspread.Cell(row_num, COL_TITLE, fb_data['title']))
         
         time.sleep(0.2)
 
@@ -228,6 +337,9 @@ if __name__ == "__main__":
     # --- RUN GLOBAL STATS ---
     print("\n--- Updating Global Counters ---")
     update_global_insta_stats()
+    
+    if fb_page_id and fb_page_token:
+        update_global_fb_stats(fb_page_id, fb_page_token)
     
     if found_yt_channel_id:
         update_global_yt_stats(found_yt_channel_id)
