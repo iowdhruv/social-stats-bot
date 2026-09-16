@@ -60,23 +60,23 @@ def fix_formatting():
     
     # ----- NEW: HYPERLINK IDs (Columns R, S, T) -----
     
-    col_r_values = sheet.col_values(18) # YT_ID
-    col_s_values = sheet.col_values(19) # IG_ID
-    col_t_values = sheet.col_values(20) # FB_ID
+    col_q_values = sheet.col_values(17) # YT_ID
+    col_r_values = sheet.col_values(18) # IG_ID
+    col_s_values = sheet.col_values(19) # FB_ID
     id_updates = []
 
     for i in range(2, len(col_values)):
-        yt_id = col_r_values[i].strip() if i < len(col_r_values) else ""
-        ig_id = col_s_values[i].strip() if i < len(col_s_values) else ""
-        fb_id = col_t_values[i].strip() if i < len(col_t_values) else ""
+        yt_id = col_q_values[i].strip() if i < len(col_q_values) else ""
+        ig_id = col_r_values[i].strip() if i < len(col_r_values) else ""
+        fb_id = col_s_values[i].strip() if i < len(col_s_values) else ""
         
         if yt_id and not str(yt_id).startswith("=HYPERLINK"):
             yt_url = f"https://www.youtube.com/watch?v={yt_id}"
-            id_updates.append({'range': f'R{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
+            id_updates.append({'range': f'Q{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
 
         if fb_id and not str(fb_id).startswith("=HYPERLINK"):
             fb_url = f"https://www.facebook.com/{fb_id}"
-            id_updates.append({'range': f'T{i + 1}', 'values': [[f'=HYPERLINK("{fb_url}", "{fb_id}")']]})
+            id_updates.append({'range': f'S{i + 1}', 'values': [[f'=HYPERLINK("{fb_url}", "{fb_id}")']]})
             
     if id_updates:
         sheet.batch_update(id_updates, value_input_option='USER_ENTERED')
