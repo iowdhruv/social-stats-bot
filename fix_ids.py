@@ -98,6 +98,15 @@ def extract_ig_shortcode(text):
     if "http" not in text and len(text) < 40: return text.strip()
     return text
 
+def extract_fb_id(text):
+    if not text: return ""
+    # Matches FB reel, video, or post IDs
+    match = re.search(r'(?:v=|/posts/|/reel/|/videos/|fbid=|story_fbid=)([0-9]+)', text)
+    if match: return match.group(1)
+    if text.strip().isdigit(): return text.strip()
+    if "http" not in text and len(text) < 40: return text.strip()
+    return text
+
 # --- MAIN LOGIC ---
 if __name__ == "__main__":
     ig_map = get_ig_id_map()
@@ -113,6 +122,7 @@ if __name__ == "__main__":
         # Safe Get
         current_yt = row[COL_YT_ID - 1].strip() if len(row) > (COL_YT_ID - 1) else ""
         current_ig = row[COL_IG_ID - 1].strip() if len(row) > (COL_IG_ID - 1) else ""
+        current_fb = row[COL_FB_ID - 1].strip() if len(row) > (COL_FB_ID - 1) else ""
         
         # --- YT FIX ---
         clean_yt = extract_yt_id(current_yt)
@@ -132,6 +142,12 @@ if __name__ == "__main__":
             else:
                 if current_ig and "http" in current_ig:
                      print(f"⚠️ Row {row_num}: IG Link '{shortcode}' not found in recent API fetch.")
+
+        # --- FB FIX ---
+        clean_fb = extract_fb_id(current_fb)
+        if clean_fb != current_fb and clean_fb != "":
+            print(f"Row {row_num}: Cleaned FB Link -> {clean_fb}")
+            updates.append(gspread.Cell(row_num, COL_FB_ID, clean_fb))
 
     if updates:
         print(f"\nWriting {len(updates)} fixes...")
