@@ -95,55 +95,94 @@ def get_fb_page_token_and_id():
 def get_facebook_data(post_id, page_token):
     if not post_id or len(str(post_id)) < 5 or not page_token: return None
     
-    # Try as a standard Post first (using 'likes' instead of 'reactions')
-    url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),likes.summary(true),shares,permalink_url&access_token={page_token}"
+    user_token = os.environ['INSTAGRAM_TOKEN']
+    tokens_to_try = [page_token, user_token]
     
-    try:
-        r = requests.get(url).json()
-        
-        # Fallback for Video/Reel nodes which use 'description' instead of 'message'
-        # We also drop 'shares' here because Video nodes don't support the shares field directly
-        if 'error' in r and r['error'].get('code') == 100:
-            url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),likes.summary(true),permalink_url&access_token={page_token}"
-            r = requests.get(url).json()
-            
-        if 'error' in r:
-            print(f"FB Error for {post_id}: {r['error']['message']}")
-            return None
-
-        title = r.get('message', r.get('description', ''))
-        
-        utc_dt = datetime.strptime(r.get('created_time'), "%Y-%m-%dT%H:%M:%S%z")
-        ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
-
-        final_views = 0
-        reach = 0
+    r = None
+    used_token = None
+    is_video_node = False
+    
+    for token in tokens_to_try:
+        # Try as a standard Post first
+        url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),likes.summary(true),shares,permalink_url&access_token={token}"
         
         try:
-            r_ins = requests.get(f"https://graph.facebook.com/v22.0/{post_id}/insights?metric=post_impressions,post_impressions_unique,post_video_views&access_token={page_token}").json()
-            if 'data' in r_ins:
-                stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
+            r = requests.get(url).json()
+            
+            # Fallback for Video/Reel nodes which use 'description' instead of 'message'
+            if 'error' in r and r['error'].get('code') == 100:
+                url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),likes.summary(true),shares,permalink_url&access_token={token}"
+                r = requests.get(url).json()
+                is_video_node = True
+                
+                # Second fallback: Video nodes sometimes don't support 'shares'
+                if 'error' in r and r['error'].get('code') == 100:
+                    url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),likes.summary(true),permalink_url&access_token={token}"
+                    r = requests.get(url).json()
+                
+            if 'error' not in r:
+                used_token = token
+                break
+        except Exception as e:
+            print(f"FB Request Exception: {e}")
+            break
+            
+    if not r or 'error' in r:
+        err_msg = r['error']['message'] if r and 'error' in r else "Unknown Error"
+        print(f"FB Error for {post_id}: {err_msg}")
+        return None
+
+    title = r.get('message', r.get('description', ''))
+    
+    utc_dt = datetime.strptime(r.get('created_time'), "%Y-%m-%dT%H:%M:%S%z")
+    ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+
+    final_views = 0
+    reach = 0
+    
+    try:
+        if is_video_node:
+            # Video metrics
+            ins_url = f"https://graph.facebook.com/v22.0/{post_id}/insights?metric=total_video_views,total_video_impressions_unique&access_token={used_token}"
+        else:
+            # Post metrics
+            ins_url = f"https://graph.facebook.com/v22.0/{post_id}/insights?metric=post_video_views,post_impressions_unique,post_impressions&access_token={used_token}"
+            
+        r_ins = requests.get(ins_url).json()
+        
+        if 'data' in r_ins:
+            stats = {item['name']: int(item['values'][0]['value']) for item in r_ins['data']}
+            if is_video_node:
+                final_views = stats.get('total_video_views', 0)
+                reach = stats.get('total_video_impressions_unique', 0)
+            else:
                 final_views = stats.get('post_video_views', stats.get('post_impressions', 0))
                 reach = stats.get('post_impressions_unique', 0)
-        except: pass
-
-        comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
-        likes_count = r.get('likes', {}).get('summary', {}).get('total_count', 0)
-        shares_count = r.get('shares', {}).get('count', 0)
-
-        return {
-            'date': ist_date,
-            'title': title,
-            'views': final_views,
-            'comments': comments_count,
-            'likes': likes_count,
-            'shares': shares_count,
-            'reach': reach,
-            'permalink': r.get('permalink_url', '')
-        }
+        elif 'error' in r_ins and not is_video_node:
+            # Fallback if it's a post but post_video_views fails
+            ins_url_fallback = f"https://graph.facebook.com/v22.0/{post_id}/insights?metric=post_impressions,post_impressions_unique&access_token={used_token}"
+            r_ins_fallback = requests.get(ins_url_fallback).json()
+            if 'data' in r_ins_fallback:
+                stats = {item['name']: int(item['values'][0]['value']) for item in r_ins_fallback['data']}
+                final_views = stats.get('post_impressions', 0)
+                reach = stats.get('post_impressions_unique', 0)
     except Exception as e:
-        print(f"FB Exception: {e}")
-        return None
+        print(f"FB Insights Exception: {e}")
+
+    comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
+    likes_count = r.get('likes', {}).get('summary', {}).get('total_count', 0)
+    shares_count = r.get('shares', {}).get('count', 0)
+
+    return {
+        'date': ist_date,
+        'title': title,
+        'views': final_views,
+        'comments': comments_count,
+        'likes': likes_count,
+        'shares': shares_count,
+        'reach': reach,
+        'permalink': r.get('permalink_url', '')
+    }
 
 def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
