@@ -73,6 +73,10 @@ def fix_formatting():
         if yt_id and not str(yt_id).startswith("=HYPERLINK"):
             yt_url = f"https://www.youtube.com/watch?v={yt_id}"
             id_updates.append({'range': f'R{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
+
+        if fb_id and not str(fb_id).startswith("=HYPERLINK"):
+            fb_url = f"https://www.facebook.com/{fb_id}"
+            id_updates.append({'range': f'T{i + 1}', 'values': [[f'=HYPERLINK("{fb_url}", "{fb_id}")']]})
             
     if id_updates:
         sheet.batch_update(id_updates, value_input_option='USER_ENTERED')
