@@ -95,14 +95,23 @@ def get_fb_page_token_and_id():
 def get_facebook_data(post_id, page_token):
     if not post_id or len(str(post_id)) < 5 or not page_token: return None
     
+    # Try as a standard Post first
     url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),reactions.summary(true),shares,permalink_url&access_token={page_token}"
     
     try:
         r = requests.get(url).json()
+        
+        # Fallback for Video/Reel nodes which use 'description' instead of 'message'
+        if 'error' in r and r['error'].get('code') == 100:
+            url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),reactions.summary(true),shares,permalink_url&access_token={page_token}"
+            r = requests.get(url).json()
+            
         if 'error' in r:
             print(f"FB Error for {post_id}: {r['error']['message']}")
             return None
 
+        title = r.get('message', r.get('description', ''))
+        
         utc_dt = datetime.strptime(r.get('created_time'), "%Y-%m-%dT%H:%M:%S%z")
         ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
 
@@ -123,7 +132,7 @@ def get_facebook_data(post_id, page_token):
 
         return {
             'date': ist_date,
-            'title': r.get('message', ''),
+            'title': title,
             'views': final_views,
             'comments': comments_count,
             'likes': reactions_count,
@@ -275,6 +284,10 @@ if __name__ == "__main__":
         yt_id = row[COL_YT_ID - 1].strip() if len(row) > (COL_YT_ID - 1) else ""
         ig_id = row[COL_IG_ID - 1].strip() if len(row) > (COL_IG_ID - 1) else ""
         fb_id = row[COL_FB_ID - 1].strip() if len(row) > (COL_FB_ID - 1) else ""
+
+        if fb_id and not fb_id.isdigit():
+            print(f"⚠️ Skipping invalid FB ID (Not numeric): {fb_id}")
+            fb_id = ""
         
         # --- YT ---
         if yt_id:
