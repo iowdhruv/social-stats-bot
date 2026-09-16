@@ -101,66 +101,108 @@ def get_facebook_data(post_id, page_token, page_id=None):
     r = None
     used_token = None
     is_video_node = False
+    last_error = None
     
-    # 1. Fetch Node Data
+    # 1. Fetch Node Data with Tiered Fallbacks
     for token in tokens_to_try:
-        # Standard Post query: uses message, shares, and likes.summary(true)
+        # Tier 1: Standard Post query
         url = (
             f"https://graph.facebook.com/v26.0/{post_id}"
             f"?fields=created_time,message,comments.summary(true),likes.summary(true),shares,permalink_url,from"
             f"&access_token={token}"
         )
-        
         try:
             res = requests.get(url).json()
             
-            # (#100) Tried accessing nonexisting field -> Video / Reel node
-            if 'error' in res and res['error'].get('code') == 100:
+            # If standard post query fails with #100 or #200, treat as Video / Reel node
+            if 'error' in res:
+                last_error = res['error']
                 is_video_node = True
-                # Video node: uses description, title, views, and likes.summary(true) (no reactions or shares field)
+                
+                # Tier 2: Video/Reel node with engagement fields
                 url = (
                     f"https://graph.facebook.com/v26.0/{post_id}"
-                    f"?fields=created_time,description,title,views,comments.summary(true),likes.summary(true),permalink_url,from"
+                    f"?fields=created_time,description,title,views,comments.summary(true),likes.summary(true),permalink_url"
                     f"&access_token={token}"
                 )
                 res = requests.get(url).json()
                 
-                # Secondary fallback if views/title is not supported on older video nodes
-                if 'error' in res and res['error'].get('code') == 100:
+                # Tier 3: If Tier 2 fails with #200 (common on cross-posted Reels due to engagement edges), query clean media fields
+                if 'error' in res:
+                    last_error = res['error']
                     url = (
                         f"https://graph.facebook.com/v26.0/{post_id}"
-                        f"?fields=created_time,description,comments.summary(true),likes.summary(true),permalink_url,from"
+                        f"?fields=created_time,description,title,views,permalink_url"
                         f"&access_token={token}"
                     )
                     res = requests.get(url).json()
-            
-            if 'error' not in res:
+                    
+                    # Tier 4: Minimal metadata fallback
+                    if 'error' in res:
+                        last_error = res['error']
+                        url = (
+                            f"https://graph.facebook.com/v26.0/{post_id}"
+                            f"?fields=created_time,description,permalink_url"
+                            f"&access_token={token}"
+                        )
+                        res = requests.get(url).json()
+                        if 'error' in res:
+                            last_error = res['error']
+
+            if 'error' not in res and res:
                 r = res
                 used_token = token
                 break
-            elif res['error'].get('code') == 200:
-                # (#200) Permissions error fallback for cross-posted content
-                continue
-            else:
-                r = res
         except Exception as e:
             print(f"FB Request Exception: {e}")
             break
             
     if not r or 'error' in r:
-        err_msg = r['error']['message'] if r and 'error' in r else "Unknown Error"
+        err_msg = (
+            r.get('error', {}).get('message')
+            if (r and isinstance(r, dict) and 'error' in r)
+            else (last_error.get('message') if last_error else "Unknown Error")
+        )
         print(f"FB Error for {post_id}: {err_msg}")
         return None
 
     title = r.get('message', r.get('description', r.get('title', '')))
     
-    utc_dt = datetime.strptime(r.get('created_time'), "%Y-%m-%dT%H:%M:%S%z")
-    ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+    utc_time = r.get('created_time')
+    ist_date = ""
+    if utc_time:
+        try:
+            utc_dt = datetime.strptime(utc_time, "%Y-%m-%dT%H:%M:%S%z")
+            ist_date = (utc_dt + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+        except Exception:
+            ist_date = str(utc_time)[:10]
 
     final_views = int(r.get('views', 0)) if is_video_node else 0
     reach = 0
+
+    # 2. Fetch Engagement Safely (Isolated requests so #200 won't break the node)
+    comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
+    likes_count = r.get('likes', {}).get('summary', {}).get('total_count', 0)
     
-    # 2. Fetch Insights (Views & Reach)
+    if 'comments' not in r:
+        try:
+            c_url = f"https://graph.facebook.com/v26.0/{post_id}/comments?summary=true&limit=0&access_token={used_token}"
+            c_res = requests.get(c_url).json()
+            if 'summary' in c_res:
+                comments_count = c_res['summary'].get('total_count', 0)
+        except Exception:
+            pass
+
+    if 'likes' not in r:
+        try:
+            l_url = f"https://graph.facebook.com/v26.0/{post_id}/likes?summary=true&limit=0&access_token={used_token}"
+            l_res = requests.get(l_url).json()
+            if 'summary' in l_res:
+                likes_count = l_res['summary'].get('total_count', 0)
+        except Exception:
+            pass
+
+    # 3. Fetch Insights (Views & Reach)
     try:
         if is_video_node:
             ins_url = (
@@ -177,6 +219,17 @@ def get_facebook_data(post_id, page_token, page_id=None):
             )
             
         r_ins = requests.get(ins_url).json()
+        
+        # If Page token fails insights on cross-posted Reels, attempt User token
+        alt_token = user_token if used_token == page_token else page_token
+        if ('error' in r_ins or not r_ins.get('data')) and alt_token:
+            try:
+                ins_url_alt = ins_url.replace(used_token, alt_token)
+                r_ins_alt = requests.get(ins_url_alt).json()
+                if 'data' in r_ins_alt and r_ins_alt['data']:
+                    r_ins = r_ins_alt
+            except Exception:
+                pass
         
         if 'data' in r_ins and r_ins['data']:
             stats = {
@@ -201,13 +254,10 @@ def get_facebook_data(post_id, page_token, page_id=None):
     except Exception as e:
         print(f"FB Insights Exception: {e}")
 
-    comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
-    likes_count = r.get('likes', {}).get('summary', {}).get('total_count', 0)
-
-    # 3. Handle Shares
+    # 4. Handle Shares
     shares_count = r.get('shares', {}).get('count', 0)
     if is_video_node and shares_count == 0:
-        target_page_id = page_id or r.get('from', {}).get('id')
+        target_page_id = page_id or r.get('from', {}).get('id') or globals().get('fb_page_id')
         if target_page_id:
             try:
                 post_url = f"https://graph.facebook.com/v26.0/{target_page_id}_{post_id}?fields=shares&access_token={used_token}"
@@ -215,6 +265,10 @@ def get_facebook_data(post_id, page_token, page_id=None):
                 shares_count = post_res.get('shares', {}).get('count', 0)
             except Exception:
                 shares_count = 0
+
+    permalink = r.get('permalink_url', '')
+    if not permalink and post_id:
+        permalink = f"https://www.facebook.com/reel/{post_id}" if is_video_node else f"https://www.facebook.com/{post_id}"
 
     return {
         'date': ist_date,
@@ -224,7 +278,7 @@ def get_facebook_data(post_id, page_token, page_id=None):
         'likes': likes_count,
         'shares': shares_count,
         'reach': reach,
-        'permalink': r.get('permalink_url', '')
+        'permalink': permalink
     }
 
 def get_insta_data(media_id):
