@@ -219,29 +219,6 @@ def get_facebook_data(post_id, page_token, page_id=None):
         except Exception as e:
             print(f"FB Insights Exception: {e}")
 
-        # Protect final_views: only fallback if views was not populated from node
-        if final_views == 0:
-            if is_video_node:
-                try:
-                    v_res = requests.get(f"https://graph.facebook.com/v26.0/{post_id}/video_insights?metric=fb_reels_total_plays,total_video_views&access_token={used_token}").json()
-                    for item in v_res.get('data', []):
-                        if item.get('values'):
-                            final_views = int(item['values'][0]['value'])
-                            if final_views > 0: break
-                except Exception:
-                    pass
-            else:
-                try:
-                    p_res = requests.get(f"https://graph.facebook.com/v26.0/{post_id}/insights?metric=post_media_view,post_video_views&access_token={used_token}").json()
-                    for item in p_res.get('data', []):
-                        if item.get('values'):
-                            final_views = int(item['values'][0]['value'])
-                            if final_views > 0: break
-                except Exception:
-                    pass
-    except Exception as e:
-        print(f"FB Insights Exception: {e}")
-
     # 4. Handle Shares
     shares_count = r.get('shares', {}).get('count', 0)
     if is_video_node and shares_count == 0:
