@@ -6,9 +6,9 @@ import re
 from google.oauth2.service_account import Credentials
 
 # --- CONFIG ---
-COL_YT_ID = 18  # Column R
-COL_IG_ID = 19  # Column S
-COL_FB_ID = 20  # Column T
+COL_YT_ID = 17  # Column Q
+COL_IG_ID = 18  # Column R
+COL_FB_ID = 19  # Column S
 IG_FETCH_LIMIT = 50 
 
 # --- SETUP ---
