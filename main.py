@@ -204,80 +204,75 @@ def get_facebook_data(post_id, page_token, page_id=None):
 
     # 3. Fetch Insights (Views & Reach)
     try:
-        stats = {}
-        if is_video_node:
-            ins_url = (
-                f"https://graph.facebook.com/v26.0/{post_id}/video_insights"
-                f"?metric=post_impressions_unique,blue_reels_play_count,fb_reels_total_plays,total_video_views,total_video_views_unique"
-                f"&access_token={used_token}"
-            )
-        else:
-            ins_url = (
-                f"https://graph.facebook.com/v26.0/{post_id}/insights"
-                f"?metric=post_total_media_view_unique,post_media_view,post_video_views,post_impressions,post_impressions_unique"
-                f"&access_token={used_token}"
-            )
-            
-        r_ins = requests.get(ins_url).json()
-        
-        # If Page token fails insights on cross-posted Reels, attempt User token
+        target_page_id = page_id or r.get('from', {}).get('id') or globals().get('fb_page_id')
         alt_token = user_token if used_token == page_token else page_token
-        if ('error' in r_ins or not r_ins.get('data')) and alt_token:
+
+        # A. Query Viewers Metric (post_total_media_view_unique)
+        candidate_post_urls = [
+            f"https://graph.facebook.com/v26.0/{post_id}/insights?metric=post_total_media_view_unique&access_token={used_token}"
+        ]
+        if target_page_id:
+            candidate_post_urls.append(
+                f"https://graph.facebook.com/v26.0/{target_page_id}_{post_id}/insights?metric=post_total_media_view_unique&access_token={used_token}"
+            )
+
+        for p_url in candidate_post_urls:
             try:
-                ins_url_alt = ins_url.replace(used_token, alt_token)
-                r_ins_alt = requests.get(ins_url_alt).json()
-                if 'data' in r_ins_alt and r_ins_alt['data']:
-                    r_ins = r_ins_alt
+                p_res = requests.get(p_url).json()
+                if ('error' in p_res or not p_res.get('data')) and alt_token:
+                    p_res = requests.get(p_url.replace(used_token, alt_token)).json()
+
+                for item in p_res.get('data', []):
+                    if item.get('name') == 'post_total_media_view_unique' and item.get('values'):
+                        val = int(item['values'][0]['value'])
+                        if val > 0:
+                            reach = val
+                            break
+                if reach > 0:
+                    break
             except Exception:
                 pass
-        
-        if 'data' in r_ins and r_ins['data']:
-            stats = {
-                item['name']: int(item['values'][0]['value'])
-                for item in r_ins['data']
-                if item.get('values') and len(item['values']) > 0
-            }
-            if is_video_node:
-                # Never overwrite an already accurate final_views
-                if final_views == 0:
-                    final_views = (
-                        stats.get('fb_reels_total_plays')
-                        or stats.get('blue_reels_play_count')
-                        or stats.get('total_video_views', 0)
-                    )
-                reach = (
-                    stats.get('post_impressions_unique')
-                    or stats.get('total_video_views_unique')
-                    or stats.get('blue_reels_play_count', 0)
-                )
-            else:
-                if final_views == 0:
-                    final_views = (
-                        stats.get('post_video_views')
-                        or stats.get('post_media_view')
-                        or stats.get('post_impressions', 0)
-                    )
-                reach = (
-                    stats.get('post_total_media_view_unique')
-                    or stats.get('post_impressions_unique', 0)
-                )
 
-        # Post-level reach fallback for Reels/Videos if reach remains 0
+        # B. If it's a Reel and reach is still 0, query /video_insights for unique initial plays (1ms+ playback excluding replays)
         if is_video_node and reach == 0:
-            target_page_id = page_id or r.get('from', {}).get('id') or globals().get('fb_page_id')
-            if target_page_id:
+            v_url = f"https://graph.facebook.com/v26.0/{post_id}/video_insights?metric=blue_reels_play_count,fb_reels_total_plays&access_token={used_token}"
+            try:
+                v_res = requests.get(v_url).json()
+                if ('error' in v_res or not v_res.get('data')) and alt_token:
+                    v_res = requests.get(v_url.replace(used_token, alt_token)).json()
+
+                for item in v_res.get('data', []):
+                    # blue_reels_play_count counts unique reel plays (1ms+) excluding replays
+                    if item.get('name') == 'blue_reels_play_count' and item.get('values'):
+                        val = int(item['values'][0]['value'])
+                        if val > 0:
+                            reach = val
+                            break
+            except Exception:
+                pass
+
+        # C. Fallback for final_views ONLY if final_views was not set from the node
+        if final_views == 0:
+            if is_video_node:
                 try:
-                    p_url = f"https://graph.facebook.com/v26.0/{target_page_id}_{post_id}/insights?metric=post_total_media_view_unique,post_impressions_unique&access_token={used_token}"
-                    p_ins = requests.get(p_url).json()
-                    for item in p_ins.get('data', []):
-                        if item.get('values') and len(item['values']) > 0:
-                            reach = int(item['values'][0]['value'])
-                            if reach > 0: break
+                    v_url = f"https://graph.facebook.com/v26.0/{post_id}/video_insights?metric=fb_reels_total_plays,total_video_views&access_token={used_token}"
+                    v_res = requests.get(v_url).json()
+                    for item in v_res.get('data', []):
+                        if item.get('name') in ['fb_reels_total_plays', 'total_video_views'] and item.get('values'):
+                            final_views = int(item['values'][0]['value'])
+                            if final_views > 0: break
                 except Exception:
                     pass
-            # Final fallback: resolve to unique plays or verified views
-            if reach == 0:
-                reach = stats.get('blue_reels_play_count') or stats.get('total_video_views_unique') or final_views
+            else:
+                try:
+                    p_url = f"https://graph.facebook.com/v26.0/{post_id}/insights?metric=post_media_view,post_video_views&access_token={used_token}"
+                    p_res = requests.get(p_url).json()
+                    for item in p_res.get('data', []):
+                        if item.get('values'):
+                            final_views = int(item['values'][0]['value'])
+                            if final_views > 0: break
+                except Exception:
+                    pass
     except Exception as e:
         print(f"FB Insights Exception: {e}")
 
