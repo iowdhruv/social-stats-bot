@@ -58,19 +58,21 @@ def fix_formatting():
     # ----------------------------------------
 
     
-    # ----- NEW: HYPERLINK IDs (Columns M & N) -----
+    # ----- NEW: HYPERLINK IDs (Columns R, S, T) -----
     
-    col_m_values = sheet.col_values(13) # YT_ID
-    col_n_values = sheet.col_values(14) # IG_ID
+    col_r_values = sheet.col_values(18) # YT_ID
+    col_s_values = sheet.col_values(19) # IG_ID
+    col_t_values = sheet.col_values(20) # FB_ID
     id_updates = []
 
     for i in range(2, len(col_values)):
-        yt_id = col_m_values[i].strip() if i < len(col_m_values) else ""
-        ig_id = col_n_values[i].strip() if i < len(col_n_values) else ""
+        yt_id = col_r_values[i].strip() if i < len(col_r_values) else ""
+        ig_id = col_s_values[i].strip() if i < len(col_s_values) else ""
+        fb_id = col_t_values[i].strip() if i < len(col_t_values) else ""
         
         if yt_id and not str(yt_id).startswith("=HYPERLINK"):
             yt_url = f"https://www.youtube.com/watch?v={yt_id}"
-            id_updates.append({'range': f'M{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
+            id_updates.append({'range': f'R{i + 1}', 'values': [[f'=HYPERLINK("{yt_url}", "{yt_id}")']]})
             
     if id_updates:
         sheet.batch_update(id_updates, value_input_option='USER_ENTERED')
