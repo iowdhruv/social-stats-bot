@@ -95,15 +95,16 @@ def get_fb_page_token_and_id():
 def get_facebook_data(post_id, page_token):
     if not post_id or len(str(post_id)) < 5 or not page_token: return None
     
-    # Try as a standard Post first
-    url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),reactions.summary(true),shares,permalink_url&access_token={page_token}"
+    # Try as a standard Post first (using 'likes' instead of 'reactions')
+    url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,message,comments.summary(true),likes.summary(true),shares,permalink_url&access_token={page_token}"
     
     try:
         r = requests.get(url).json()
         
         # Fallback for Video/Reel nodes which use 'description' instead of 'message'
+        # We also drop 'shares' here because Video nodes don't support the shares field directly
         if 'error' in r and r['error'].get('code') == 100:
-            url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),reactions.summary(true),shares,permalink_url&access_token={page_token}"
+            url = f"https://graph.facebook.com/v22.0/{post_id}?fields=created_time,description,comments.summary(true),likes.summary(true),permalink_url&access_token={page_token}"
             r = requests.get(url).json()
             
         if 'error' in r:
@@ -127,7 +128,7 @@ def get_facebook_data(post_id, page_token):
         except: pass
 
         comments_count = r.get('comments', {}).get('summary', {}).get('total_count', 0)
-        reactions_count = r.get('reactions', {}).get('summary', {}).get('total_count', 0)
+        likes_count = r.get('likes', {}).get('summary', {}).get('total_count', 0)
         shares_count = r.get('shares', {}).get('count', 0)
 
         return {
@@ -135,7 +136,7 @@ def get_facebook_data(post_id, page_token):
             'title': title,
             'views': final_views,
             'comments': comments_count,
-            'likes': reactions_count,
+            'likes': likes_count,
             'shares': shares_count,
             'reach': reach,
             'permalink': r.get('permalink_url', '')
@@ -143,7 +144,6 @@ def get_facebook_data(post_id, page_token):
     except Exception as e:
         print(f"FB Exception: {e}")
         return None
-
 
 def get_insta_data(media_id):
     if not media_id or len(str(media_id)) < 5: return None
